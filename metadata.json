@@ -1,0 +1,6 @@
+{
+  "name": "Codexa - نظام العقود الإلكتروني",
+  "description": "نظام العقود الإلكتروني الرسمي لشركة Codexa لتطوير التطبيقات والمواقع والمنظومات البرمجية.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

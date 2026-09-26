@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role distinction between client and admin",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "role": { "type": "string", "enum": ["client", "admin"] },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "phoneNumber": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Contract": {
+      "title": "Contract",
+      "description": "Electronic contract issued by Codexa",
+      "type": "object",
+      "properties": {
+        "contractId": { "type": "string", "maxLength": 128 },
+        "contractCode": { "type": "string", "pattern": "^CDX-\\d{4}-[A-Z0-9]{6}$", "maxLength": 20 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "clientEmail": { "type": "string", "format": "email", "maxLength": 254 },
+        "clientPhone": { "type": "string", "maxLength": 30 },
+        "projectName": { "type": "string", "maxLength": 200 },
+        "contractType": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "contractContent": { "type": "string", "maxLength": 20000 },
+        "terms": { "type": "string", "maxLength": 15000 },
+        "amount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "contractDate": { "type": "string", "maxLength": 30 },
+        "endDate": { "type": "string", "maxLength": 30 },
+        "duration": { "type": "string", "maxLength": 50 },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending_review", "waiting_client", "approved", "completed", "downloaded"]
+        },
+        "recordingUrl": { "type": "string", "maxLength": 1000 },
+        "recordingDuration": { "type": "number" },
+        "recordedAt": { "type": "string" },
+        "verificationStatus": { "type": "string", "maxLength": 50 },
+        "transcript": { "type": "string", "maxLength": 3000 },
+        "approvedAt": { "type": "string" },
+        "approvedBy": { "type": "string", "maxLength": 128 },
+        "downloadedAt": { "type": "string" },
+        "pdfUrl": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": [
+        "contractId",
+        "contractCode",
+        "clientId",
+        "clientName",
+        "clientEmail",
+        "projectName",
+        "contractType",
+        "description",
+        "contractContent",
+        "terms",
+        "amount",
+        "totalAmount",
+        "currency",
+        "contractDate",
+        "endDate",
+        "duration",
+        "status"
+      ]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Internal notifications for clients and administrators",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string", "maxLength": 128 },
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "maxLength": 50 },
+        "contractId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "read": { "type": "boolean" },
+        "readAt": { "type": "string" }
+      },
+      "required": ["notificationId", "recipientId", "title", "message", "type", "createdAt", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles"
+    },
+    "/contracts/{contractId}": {
+      "schema": "Contract",
+      "description": "Company contracts managed by Admin and reviewed/approved by Clients"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User and Admin notifications"
+    }
+  }
+}
