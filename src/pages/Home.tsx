@@ -212,11 +212,13 @@ export const Home: React.FC<HomeProps> = ({ setCurrentView, onOpenContract }) =>
             </div>
             <div>
               <h4 className="text-sm font-bold text-white">هل لديك استفسار بشأن عقدك البرمجي؟</h4>
-              <p className="text-xs text-slate-400">فريق Codexa متواجد للتنسيق والمتابعة المباشرة.</p>
+              <p className="text-xs text-slate-400">Codexa متواجد للتنسيق والمتابعة المباشرة.</p>
             </div>
           </div>
           <div className="flex items-center gap-2 font-mono text-base font-bold text-blue-300 dir-ltr bg-slate-950/80 px-4 py-2 rounded-xl border border-slate-800">
-            {OFFICIAL_PHONE}
+            <a href="https://wa.me/218920619363" target="_blank" rel="noreferrer" className="hover:text-blue-200 transition-colors">
+              {OFFICIAL_PHONE}
+            </a>
           </div>
         </div>
 

@@ -18,6 +18,7 @@ import {
   OFFICIAL_ADMIN_UIDS
 } from '../types';
 import { sendNotification } from './notificationService';
+import { queueContractStatusEmail } from './emailService';
 
 const LOCAL_CONTRACTS_KEY = 'codexa_local_contracts_store';
 const DELETED_CONTRACTS_KEY = 'codexa_deleted_contracts_store';
@@ -119,6 +120,11 @@ export async function findUserIdByEmail(email: string): Promise<string | null> {
   }
 }
 
+// Export local contracts for fast UI access
+export function getLocalContractsList(): Contract[] {
+  return getLocalContracts();
+}
+
 // Fetch single contract by contractId with permission check
 export async function getContractById(
   contractId: string, 
@@ -131,14 +137,9 @@ export async function getContractById(
 
   const verifyAndLink = (contract: Contract): Contract => {
     if (isAdmin) return contract;
-    
-    // If no user is logged in (Guest), we allow access to the contract view
-    // but we don't link it to any UID.
     if (!currentUserId) return contract;
 
     const contractEmail = contract.clientEmail?.trim().toLowerCase();
-    
-    // Check ownership: matching UID, matching Email, or temporary client ID
     const isOwner = contract.clientId === currentUserId || 
                     (userEmail && contractEmail && userEmail === contractEmail) ||
                     (!contract.clientId || contract.clientId.startsWith('client_'));
@@ -148,15 +149,16 @@ export async function getContractById(
         contract.clientId = currentUserId;
         saveLocalContract(contract);
         if (db) {
-          try {
-            updateDoc(doc(db, 'contracts', contract.contractId), { clientId: currentUserId }).catch(() => {});
-          } catch (e) {}
+          updateDoc(doc(db, 'contracts', contract.contractId), { clientId: currentUserId }).catch(() => {});
         }
       }
       return contract;
     }
     throw new Error('لا يمكنك الوصول إلى هذا العقد.');
   };
+
+  // If we have it locally, return it immediately if no Firestore connection
+  if (!db && localContract) return verifyAndLink(localContract);
 
   if (db) {
     try {
@@ -170,17 +172,12 @@ export async function getContractById(
         return verified;
       }
     } catch (err: any) {
-      if (err.message === 'لا يمكنك الوصول إلى هذا العقد.') {
-        throw err;
-      }
+      if (err.message === 'لا يمكنك الوصول إلى هذا العقد.') throw err;
       console.warn("Firestore getContractById fallback:", err);
     }
   }
 
-  if (localContract) {
-    return verifyAndLink(localContract);
-  }
-
+  if (localContract) return verifyAndLink(localContract);
   throw new Error('لم يتم العثور على العقد المطلوب.');
 }
 
@@ -423,14 +420,14 @@ export async function uploadContractRecording(
   if (storage) {
     try {
       const storageRef = ref(storage, recordingPath);
-      // Timeout after 8 seconds for storage, then fallback to local persistence
+      // Aggressive timeout (3s) for storage upload to ensure instant UX
       const uploadPromise = uploadBytes(storageRef, audioBlob, { contentType: mime });
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
       
       const uploadRes = await Promise.race([uploadPromise, timeoutPromise]) as any;
       recordingUrl = await getDownloadURL(uploadRes.ref);
     } catch (storageErr) {
-      console.warn("Storage upload notice or timeout, falling back to data URL:", storageErr);
+      console.warn("Storage upload deferred or timeout, using local data URL for speed:", storageErr);
     }
   }
 
@@ -463,6 +460,19 @@ export async function uploadContractRecording(
     localContract.transcript = transcript || 'تم استلام الإقرار الصوتي المسجل بنجاح وبانتظار المراجعة.';
     localContract.updatedAt = new Date().toISOString();
     saveLocalContract(localContract);
+  }
+
+  // Send status email to client
+  if (localContract && localContract.clientEmail) {
+    queueContractStatusEmail({
+      contractId,
+      contractCode,
+      projectName: localContract.projectName,
+      clientName: localContract.clientName || 'العميل',
+      clientEmail: localContract.clientEmail,
+      newStatus: 'pending_review',
+      oldStatus: 'waiting_client',
+    }).catch(() => {});
   }
 
   // Update in Firestore
@@ -527,18 +537,14 @@ export async function approveContract(
   }
 
   if (db) {
-    try {
-      const contractRef = doc(db, 'contracts', contractId);
-      await updateDoc(contractRef, {
-        status: 'approved',
-        approvedAt: new Date().toISOString(),
-        approvedBy: userId,
-        approvalStatus: 'approved',
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.warn("Firestore approveContract notice:", err);
-    }
+    // Perform firestore update in background to keep UI responsive
+    updateDoc(doc(db, 'contracts', contractId), {
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+      approvedBy: userId,
+      approvalStatus: 'approved',
+      updatedAt: new Date().toISOString(),
+    }).catch(err => console.warn("Background firestore approveContract warning:", err));
   }
 
   for (const adminId of OFFICIAL_ADMIN_UIDS) {
@@ -548,6 +554,19 @@ export async function approveContract(
       message: `قام العميل بالموافقة الرسمية على عقد (${projectName}) كود: ${contractCode}.`,
       type: 'contract_approved',
       contractId,
+    }).catch(() => {});
+  }
+
+  // Send status email to client & admin
+  if (localContract && localContract.clientEmail) {
+    queueContractStatusEmail({
+      contractId,
+      contractCode,
+      projectName,
+      clientName: localContract.clientName || 'العميل',
+      clientEmail: localContract.clientEmail,
+      newStatus: 'approved',
+      oldStatus: 'pending_review',
     }).catch(() => {});
   }
 }
@@ -569,6 +588,19 @@ export async function markContractDownloaded(
     localContract.downloadedAt = new Date().toISOString();
     localContract.updatedAt = new Date().toISOString();
     saveLocalContract(localContract);
+  }
+
+  // Send status email for downloaded contract
+  if (localContract && localContract.clientEmail) {
+    queueContractStatusEmail({
+      contractId,
+      contractCode,
+      projectName: localContract.projectName,
+      clientName: localContract.clientName || 'العميل',
+      clientEmail: localContract.clientEmail,
+      newStatus: 'downloaded',
+      oldStatus: 'approved',
+    }).catch(() => {});
   }
 
   // 2. Storage upload with timeout
@@ -624,10 +656,23 @@ export async function updateContractStatusByAdmin(
   newStatus: ContractStatus
 ): Promise<void> {
   const localContract = getLocalContracts().find(c => c.contractId === contractId);
+  const oldStatus = localContract?.status;
   if (localContract) {
     localContract.status = newStatus;
     localContract.updatedAt = new Date().toISOString();
     saveLocalContract(localContract);
+  }
+
+  if (localContract && localContract.clientEmail) {
+    queueContractStatusEmail({
+      contractId,
+      contractCode: localContract.contractCode,
+      projectName: localContract.projectName,
+      clientName: localContract.clientName || 'العميل',
+      clientEmail: localContract.clientEmail,
+      newStatus,
+      oldStatus,
+    }).catch(() => {});
   }
 
   if (db) {
@@ -660,6 +705,19 @@ export async function approveContractByAdmin(
     localContract.approvalStatus = 'approved';
     localContract.updatedAt = now;
     saveLocalContract(localContract);
+  }
+
+  // Send email to client upon admin approval
+  if (localContract && localContract.clientEmail) {
+    queueContractStatusEmail({
+      contractId,
+      contractCode,
+      projectName,
+      clientName: localContract.clientName || 'العميل',
+      clientEmail: localContract.clientEmail,
+      newStatus: 'approved',
+      oldStatus: 'pending_review',
+    }).catch(() => {});
   }
 
   if (db) {

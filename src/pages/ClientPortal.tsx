@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Contract, STATUS_LABELS, STATUS_COLORS, AppNotification } from '../types';
-import { searchContractByCode, getClientContracts } from '../services/contractService';
-import { subscribeToNotifications, markNotificationAsRead } from '../services/notificationService';
+import { searchContractByCode, getClientContracts, getLocalContractsList } from '../services/contractService';
+import { subscribeToNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';
 import { 
   Search, 
   FileText, 
@@ -13,14 +13,18 @@ import {
   CheckCircle2, 
   ShieldCheck,
   Bell,
-  Check
+  Check,
+  CheckCheck,
+  Home,
+  ArrowRight
 } from 'lucide-react';
 
 interface ClientPortalProps {
   onOpenContract: (contractId: string) => void;
+  onNavigateHome?: () => void;
 }
 
-export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) => {
+export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract, onNavigateHome }) => {
   const { currentUser, userProfile } = useAuth();
   const [contractCodeInput, setContractCodeInput] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
@@ -44,8 +48,22 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) =>
   const loadClientContracts = async () => {
     if (!currentUser) return;
     setLoadingContracts(true);
+
+    // 1. Instant load from local cache
+    const email = currentUser.email || undefined;
+    const localContracts = getLocalContractsList().filter(c => 
+      c.clientId === currentUser.uid || (email && c.clientEmail?.trim().toLowerCase() === email.toLowerCase())
+    );
+    
+    if (localContracts.length > 0) {
+      setAllMyContracts(localContracts);
+      setDownloadedContracts(localContracts.filter((c) => c.status === 'downloaded'));
+      setLoadingContracts(false); // Show UI immediately if we have cached data
+    }
+
+    // 2. Fetch fresh list from Firestore
     try {
-      const contracts = await getClientContracts(currentUser.uid, currentUser.email || undefined);
+      const contracts = await getClientContracts(currentUser.uid, email);
       setAllMyContracts(contracts);
       setDownloadedContracts(contracts.filter((c) => c.status === 'downloaded'));
     } catch (err) {
@@ -84,65 +102,78 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) =>
   };
 
   return (
-    <div className="py-8 max-w-4xl mx-auto px-4 sm:px-6">
+    <div className="py-6 sm:py-8 max-w-4xl mx-auto px-3 sm:px-6 w-full overflow-hidden">
       
-      {/* Welcome greeting */}
-      <div className="mb-8">
-        <h1 className="text-xl sm:text-2xl font-bold text-white">
-          أهلاً بك، {userProfile?.displayName || currentUser?.email?.split('@')[0]}
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          بوابة العقود الإلكترونية الرسمية لشركة Codexa
-        </p>
+      {/* Welcome greeting & Navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
+        <div>
+          <h1 className="text-lg sm:text-2xl font-bold text-white break-words">
+            أهلاً بك، {userProfile?.displayName || currentUser?.email?.split('@')[0]}
+          </h1>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1">
+            بوابة العقود الإلكترونية الرسمية لشركة Codexa
+          </p>
+        </div>
+
+        {onNavigateHome && (
+          <button
+            onClick={onNavigateHome}
+            className="self-start sm:self-auto inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 text-xs font-semibold shadow-md transition-all group"
+            title="الانتقال إلى الصفحة الرئيسية للموقع"
+          >
+            <Home className="w-4 h-4 group-hover:scale-110 transition-transform" />
+            <span>الرجوع إلى الصفحة الرئيسية</span>
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-800 mb-8 space-x-2 space-x-reverse text-xs">
+      <div className="flex border-b border-slate-800 mb-6 sm:mb-8 overflow-x-auto no-scrollbar gap-1 sm:gap-2 pb-1 text-xs w-full">
         <button
           onClick={() => setActiveTab('search')}
-          className={`pb-3 px-4 font-semibold border-b-2 transition-colors flex items-center gap-2 ${
+          className={`shrink-0 whitespace-nowrap pb-2.5 pt-1 px-3 sm:px-4 font-semibold border-b-2 transition-colors flex items-center gap-1.5 sm:gap-2 ${
             activeTab === 'search'
               ? 'border-blue-500 text-blue-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Search className="w-4 h-4" />
+          <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           <span>البحث عن عقد</span>
         </button>
 
         <button
           onClick={() => setActiveTab('downloaded')}
-          className={`pb-3 px-4 font-semibold border-b-2 transition-colors flex items-center gap-2 ${
+          className={`shrink-0 whitespace-nowrap pb-2.5 pt-1 px-3 sm:px-4 font-semibold border-b-2 transition-colors flex items-center gap-1.5 sm:gap-2 ${
             activeTab === 'downloaded'
               ? 'border-blue-500 text-blue-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <DownloadCloud className="w-4 h-4" />
+          <DownloadCloud className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           <span>العقود المسحوبة ({downloadedContracts.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('all')}
-          className={`pb-3 px-4 font-semibold border-b-2 transition-colors flex items-center gap-2 ${
+          className={`shrink-0 whitespace-nowrap pb-2.5 pt-1 px-3 sm:px-4 font-semibold border-b-2 transition-colors flex items-center gap-1.5 sm:gap-2 ${
             activeTab === 'all'
               ? 'border-blue-500 text-blue-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <FileText className="w-4 h-4" />
+          <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           <span>جميع عقودي ({allMyContracts.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('notifications')}
-          className={`pb-3 px-4 font-semibold border-b-2 transition-colors flex items-center gap-2 ${
+          className={`shrink-0 whitespace-nowrap pb-2.5 pt-1 px-3 sm:px-4 font-semibold border-b-2 transition-colors flex items-center gap-1.5 sm:gap-2 ${
             activeTab === 'notifications'
               ? 'border-blue-500 text-blue-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Bell className="w-4 h-4" />
+          <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           <span>الإشعارات والرسائل ({notifications.length})</span>
           {notifications.filter((n) => !n.read).length > 0 && (
             <span className="w-4 h-4 rounded-full bg-red-500 text-[10px] text-white flex items-center justify-center font-bold">
@@ -154,14 +185,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) =>
 
       {/* TAB 1: Search Tab */}
       {activeTab === 'search' && (
-        <div className="bg-[#0c1328] rounded-2xl border border-slate-800 p-6 sm:p-10 shadow-xl">
+        <div className="bg-[#0c1328] rounded-2xl border border-slate-800 p-4 sm:p-8 md:p-10 shadow-xl">
           
-          <div className="text-center max-w-xl mx-auto mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center mx-auto mb-4 text-blue-400">
-              <Search className="w-7 h-7" />
+          <div className="text-center max-w-xl mx-auto mb-6 sm:mb-8">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center mx-auto mb-3 sm:mb-4 text-blue-400">
+              <Search className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white">الوصول إلى عقدك البرمجي</h2>
-            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+            <h2 className="text-lg sm:text-2xl font-bold text-white">الوصول إلى عقدك البرمجي</h2>
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-1.5 sm:mt-2 leading-relaxed px-2">
               أدخل كود العقد المخصص لمشروعك البرمجي كما تم استلامه من إدارة شركة Codexa.
             </p>
           </div>
@@ -175,16 +206,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) =>
                   value={contractCodeInput}
                   onChange={(e) => setContractCodeInput(e.target.value)}
                   placeholder="اكتب كود عقدك (مثال: CDX-2026-7F4K92)"
-                  className="w-full pl-4 pr-12 py-3.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors uppercase tracking-wider text-center sm:text-right"
+                  className="w-full pl-3 pr-10 sm:pl-4 sm:pr-12 py-3 sm:py-3.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs sm:text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors uppercase tracking-wider text-center sm:text-right"
                   autoComplete="off"
                 />
-                <Search className="w-5 h-5 text-slate-500 absolute right-4 top-3.5 pointer-events-none" />
+                <Search className="w-4 h-4 sm:w-5 sm:h-5 text-slate-500 absolute right-3.5 top-3.5 sm:top-3.5 pointer-events-none" />
               </div>
 
               <button
                 type="submit"
                 disabled={searchLoading}
-                className="px-8 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-blue-700/20 transition-all flex items-center justify-center gap-2 shrink-0"
+                className="px-6 sm:px-8 py-3 sm:py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-lg shadow-blue-700/20 transition-all flex items-center justify-center gap-2 shrink-0"
               >
                 {searchLoading ? (
                   <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -339,14 +370,32 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ onOpenContract }) =>
       {/* TAB 4: Notifications Tab */}
       {activeTab === 'notifications' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Bell className="w-4 h-4 text-blue-400" />
               <span>الإشعارات والرسائل المستلمة من إدارة المنظومة</span>
             </h3>
-            <span className="text-xs text-slate-400 font-mono">
-              {notifications.length} إشعار
-            </span>
+            
+            <div className="flex items-center gap-3 self-end sm:self-auto">
+              <span className="text-xs text-slate-400 font-mono">
+                {notifications.length} إشعار
+              </span>
+
+              {notifications.some(n => !n.read) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await markAllNotificationsAsRead(notifications);
+                    setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: new Date().toISOString() })));
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-700/20 transition-all"
+                  title="تحديد كافة الإشعارات كمقروءة"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  <span>قراءة الكل</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {notifications.length === 0 ? (

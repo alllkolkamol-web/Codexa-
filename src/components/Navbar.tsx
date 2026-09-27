@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { OFFICIAL_PHONE, AppNotification } from '../types';
-import { subscribeToNotifications, markNotificationAsRead } from '../services/notificationService';
+import { subscribeToNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';
 import { 
   FileText, 
   User, 
@@ -14,6 +14,7 @@ import {
   Key,
   X,
   Check,
+  CheckCheck,
   ExternalLink
 } from 'lucide-react';
 
@@ -76,23 +77,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, onO
   return (
     <>
       <header className="sticky top-0 z-50 bg-[#0a1128]/95 backdrop-blur-md border-b border-slate-800/80 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
+        <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 sm:h-20">
             
             {/* Brand Logo */}
             <div 
               onClick={() => setCurrentView('home')} 
-              className="flex items-center gap-3 cursor-pointer group select-none"
+              className="flex items-center gap-2 sm:gap-3 cursor-pointer group select-none shrink-0"
             >
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-900 flex items-center justify-center shadow-lg shadow-blue-900/30 group-hover:scale-105 transition-transform duration-200 border border-blue-500/20">
-                <span className="text-2xl font-black tracking-tighter text-white font-mono">C</span>
+              <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-900 flex items-center justify-center shadow-lg shadow-blue-900/30 group-hover:scale-105 transition-transform duration-200 border border-blue-500/20">
+                <span className="text-lg sm:text-2xl font-black tracking-tighter text-white font-mono">C</span>
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-bold tracking-tight text-white font-mono">CODEXA</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/50">عقود</span>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="text-lg sm:text-2xl font-bold tracking-tight text-white font-mono">CODEXA</span>
+                  <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/50">عقود</span>
                 </div>
-                <p className="text-[11px] text-slate-400 hidden sm:block">تطوير التطبيقات والمواقع والمنظومات</p>
+                <p className="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block">تطوير التطبيقات والمواقع والمنظومات</p>
               </div>
             </div>
 
@@ -100,17 +101,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, onO
             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-800 text-xs text-slate-300">
               <Phone className="w-3.5 h-3.5 text-blue-400" />
               <span>الاتصال المباشر:</span>
-              <span className="font-mono text-blue-300 font-semibold dir-ltr">{OFFICIAL_PHONE}</span>
+              <a href="https://wa.me/218920619363" target="_blank" rel="noreferrer" className="font-mono text-blue-300 font-semibold dir-ltr hover:text-blue-100 transition-colors">
+                {OFFICIAL_PHONE}
+              </a>
             </div>
 
             {/* Right Navigation & User Controls */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
               
               {/* If Firebase Web API key is not yet provided, show a subtle key setup trigger */}
               {!isConfigured && (
                 <button
                   onClick={() => setShowApiKeyModal(true)}
-                  className="px-2.5 py-1.5 rounded-lg bg-amber-950/50 hover:bg-amber-900/60 text-amber-300 border border-amber-800/60 text-[11px] font-medium flex items-center gap-1.5 transition-colors"
+                  className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-amber-950/50 hover:bg-amber-900/60 text-amber-300 border border-amber-800/60 text-[10px] sm:text-[11px] font-medium flex items-center gap-1 sm:gap-1.5 transition-colors"
                   title="إعداد مفتاح Firebase"
                 >
                   <Key className="w-3.5 h-3.5 text-amber-400" />
@@ -134,22 +137,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, onO
                   {isAdmin ? (
                     <button
                       onClick={() => setCurrentView('admin')}
-                      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium transition-colors ${
                         currentView === 'admin' ? 'bg-slate-800 text-blue-400 border border-blue-900/50' : 'text-slate-300 hover:bg-slate-800/60'
                       }`}
                     >
                       <ShieldCheck className="w-4 h-4 text-blue-400" />
-                      <span>لوحة الإدارة</span>
+                      <span className="text-[11px] sm:text-xs">لوحة الإدارة</span>
                     </button>
                   ) : (
                     <button
                       onClick={() => setCurrentView('account')}
-                      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium transition-colors ${
                         currentView === 'account' ? 'bg-slate-800 text-blue-400 border border-blue-900/50' : 'text-slate-300 hover:bg-slate-800/60'
                       }`}
                     >
-                      <FileText className="w-4 h-4 text-blue-400" />
-                      <span>حسابي</span>
+                      <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400" />
+                      <span className="text-[11px] sm:text-xs">حسابي</span>
                     </button>
                   )}
 
@@ -157,27 +160,41 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView, onO
                   <div className="relative">
                     <button
                       onClick={() => setShowNotifications(!showNotifications)}
-                      className="relative p-2 rounded-lg text-slate-300 hover:bg-slate-800 transition-colors"
+                      className="relative p-1.5 sm:p-2 rounded-lg text-slate-300 hover:bg-slate-800 transition-colors"
                       title="الإشعارات"
                     >
-                      <Bell className="w-5 h-5" />
+                      <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
                       {unreadCount > 0 && (
-                        <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center animate-pulse">
+                        <span className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-red-500 text-[9px] sm:text-[10px] font-bold text-white rounded-full flex items-center justify-center animate-pulse">
                           {unreadCount > 9 ? '+9' : unreadCount}
                         </span>
                       )}
                     </button>
 
                     {showNotifications && (
-                      <div className="absolute left-0 mt-2 w-80 sm:w-96 bg-[#0f172a] rounded-xl border border-slate-700 shadow-2xl overflow-hidden z-50 text-right">
+                      <div className="absolute left-0 mt-2 w-72 sm:w-96 max-w-[calc(100vw-24px)] bg-[#0f172a] rounded-xl border border-slate-700 shadow-2xl overflow-hidden z-50 text-right">
                         <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Bell className="w-4 h-4 text-blue-400" />
                             <span className="text-xs font-bold text-white">الإشعارات ({notifications.length})</span>
                           </div>
-                          {unreadCount > 0 && (
-                            <span className="text-[11px] text-blue-400">{unreadCount} غير مقروء</span>
-                          )}
+                          
+                          <div className="flex items-center gap-2">
+                            {unreadCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await markAllNotificationsAsRead(notifications);
+                                  setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: new Date().toISOString() })));
+                                }}
+                                className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 hover:underline"
+                              >
+                                <CheckCheck className="w-3 h-3" />
+                                <span>قراءة الكل</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         <div className="max-h-72 overflow-y-auto divide-y divide-slate-800/60">

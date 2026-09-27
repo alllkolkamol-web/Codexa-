@@ -163,18 +163,20 @@ ${contract.terms || 'الشروط والضمانات الفنية وحقوق ا�
 
   try {
     const canvas = await html2canvas(container, {
-      scale: 1.5, // Optimized resolution (~300KB instead of 11MB)
+      scale: 1.25, // Optimized resolution balance for speed
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
       windowWidth: 750,
+      removeContainer: true,
+      imageTimeout: 10000,
     });
 
     if (document.body.contains(container)) {
       document.body.removeChild(container);
     }
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.85);
+    const imgData = canvas.toDataURL('image/jpeg', 0.8);
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',

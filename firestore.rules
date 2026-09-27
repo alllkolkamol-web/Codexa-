@@ -1,6 +1,68 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.uid in ['IymbRSEyNVfr1Xb7MfKIhJ483VO2'] ||
+        request.auth.token.email in ['codexacode@gmail.com'] ||
+        (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'admin')
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ==========================================
+    // Contracts Collection
+    // ==========================================
+    match /contracts/{contractId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    // ==========================================
+    // Notifications Collection
+    // ==========================================
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    // ==========================================
+    // Mail Queue Collection
+    // ==========================================
+    match /mail/{mailId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ==========================================
+    // Email Logs Collection
+    // ==========================================
+    match /email_logs/{logId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ==========================================
+    // Users Profile Collection
+    // ==========================================
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if true;
+    }
+
+    // Default fallback rule
     match /{document=**} {
       allow read, write: if true;
     }

@@ -23,7 +23,7 @@ export interface Contract {
   contractCode: string; // CDX-YYYY-XXXXXX
   clientId: string;
   clientName: string;
-  clientEmail: string;
+  clientEmail?: string;
   clientPhone?: string;
   projectName: string;
   contractType: string;
@@ -51,6 +51,7 @@ export interface Contract {
   approvedAt?: string;
   approvedBy?: string;
   approvalStatus?: 'approved';
+  accessPassword?: string;
   downloadedAt?: string;
   pdfUrl?: string;
   pdfPath?: string;

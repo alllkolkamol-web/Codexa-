@@ -133,6 +133,7 @@ function AppContent() {
       return (
         <ClientPortal 
           onOpenContract={(cId) => navigate(`/contract/${cId}`, cId)} 
+          onNavigateHome={() => navigate('/')}
         />
       );
     }

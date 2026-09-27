@@ -22,7 +22,9 @@ export const Footer: React.FC = () => {
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
               <Phone className="w-3.5 h-3.5 text-blue-400" />
               <span>هاتف الاتصال:</span>
-              <span className="font-mono text-blue-300 font-semibold dir-ltr">{OFFICIAL_PHONE}</span>
+              <a href="https://wa.me/218920619363" target="_blank" rel="noreferrer" className="font-mono text-blue-300 font-semibold dir-ltr hover:text-blue-200 transition-colors">
+                {OFFICIAL_PHONE}
+              </a>
             </div>
             <div className="flex items-center gap-1 text-slate-500 text-[11px]">
               <Shield className="w-3.5 h-3.5 text-slate-600" />

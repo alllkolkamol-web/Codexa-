@@ -29,17 +29,17 @@ export const SystemLoader: React.FC<SystemLoaderProps> = ({ isReady, onComplete 
         let increment = 0;
         if (isReadyRef.current) {
           // When app initialization is ready, smoothly accelerate to 100%
-          increment = Math.max(1.8, (100 - prev) * 0.18);
+          increment = Math.max(4.5, (100 - prev) * 0.4);
         } else {
-          // While app is initializing, tick progressively up towards 90%
-          if (prev < 30) {
-            increment = 0.9;
-          } else if (prev < 60) {
-            increment = 0.5;
-          } else if (prev < 88) {
-            increment = 0.2;
+          // While app is initializing, tick progressively up towards 95%
+          if (prev < 40) {
+            increment = 2.8;
+          } else if (prev < 75) {
+            increment = 1.6;
+          } else if (prev < 92) {
+            increment = 0.8;
           } else {
-            increment = 0.05; // smooth crawl near 90% until app is ready
+            increment = 0.3; // smooth crawl near 95% until app is ready
           }
         }
 

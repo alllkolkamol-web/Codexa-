@@ -7,6 +7,7 @@ import {
   getAllNotificationsForAdmin, 
   uploadNotificationImage,
   deleteNotification,
+  lookupClientByEmail,
   ClientContact
 } from '../../services/notificationService';
 import { 
@@ -47,11 +48,46 @@ export const AdminNotifications: React.FC = () => {
   const [selectedClient, setSelectedClient] = useState<ClientContact | null>(null);
   const [manualEmail, setManualEmail] = useState('');
   const [manualName, setManualName] = useState('');
+  const [detectedClient, setDetectedClient] = useState<ClientContact | null>(null);
+  const [lookingUpClient, setLookingUpClient] = useState(false);
   const [clientSearchTerm, setClientSearchTerm] = useState('');
   
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Live client lookup when manual email is typed
+  useEffect(() => {
+    const clean = manualEmail.trim().toLowerCase();
+    if (!clean || !clean.includes('@') || clean.length < 5) {
+      setDetectedClient(null);
+      return;
+    }
+
+    let isMounted = true;
+    setLookingUpClient(true);
+    const timer = setTimeout(async () => {
+      try {
+        const found = await lookupClientByEmail(clean);
+        if (isMounted) {
+          setDetectedClient(found);
+          if (found && (!manualName || manualName.trim() === '')) {
+            setManualName(found.name);
+          }
+        }
+      } catch (e) {
+        if (isMounted) setDetectedClient(null);
+      } finally {
+        if (isMounted) setLookingUpClient(false);
+      }
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [manualEmail]);
   
   // Image handling
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -170,14 +206,19 @@ export const AdminNotifications: React.FC = () => {
 
     setSubmitting(true);
     try {
-      let finalImageUrl = useUrlMode ? imageUrlInput.trim() : '';
+      let finalImageUrl = useUrlMode ? imageUrlInput.trim() : (imagePreview || '');
       let finalImagePath: string | undefined = undefined;
 
-      // Handle image if provided
+      // Quick compression if imageFile is attached and preview is available
       if (!useUrlMode && imageFile) {
-        const uploadResult = await uploadNotificationImage(imageFile);
-        finalImageUrl = uploadResult.imageUrl;
-        finalImagePath = uploadResult.imagePath;
+        try {
+          const uploadResult = await uploadNotificationImage(imageFile);
+          if (uploadResult.imageUrl) {
+            finalImageUrl = uploadResult.imageUrl;
+          }
+        } catch {
+          finalImageUrl = imagePreview || '';
+        }
       }
 
       await sendAdminNotification({
@@ -187,7 +228,7 @@ export const AdminNotifications: React.FC = () => {
         recipientEmail: targetRecipientEmail,
         title: cleanTitle,
         message: cleanMessage,
-        imageUrl: finalImageUrl || undefined,
+        imageUrl: finalImageUrl ? finalImageUrl : undefined,
         imagePath: finalImagePath,
         linkUrl: linkUrl.trim() || undefined,
         senderName: 'إدارة Codexa',
@@ -208,8 +249,10 @@ export const AdminNotifications: React.FC = () => {
       handleRemoveImage();
 
       // Refresh sent list
-      const updatedHistory = await getAllNotificationsForAdmin();
-      setSentNotifications(updatedHistory);
+      try {
+        const updatedHistory = await getAllNotificationsForAdmin();
+        setSentNotifications(updatedHistory);
+      } catch {}
     } catch (err: any) {
       console.error("Submit notification error:", err);
       setStatusMessage({ 
@@ -222,15 +265,20 @@ export const AdminNotifications: React.FC = () => {
   };
 
   const handleDelete = async (notifId: string) => {
-    const confirm = window.confirm('هل أنت متأكد من حذف هذا الإشعار؟');
-    if (!confirm) return;
-
     setDeletingId(notifId);
     try {
       await deleteNotification(notifId);
       setSentNotifications((prev) => prev.filter((n) => n.notificationId !== notifId));
+      setConfirmDeleteId(null);
+      setStatusMessage({
+        type: 'success',
+        text: 'تم حذف الإشعار نهائياً من سجل المنظومة ومن حساب العميل.'
+      });
     } catch (e: any) {
-      alert('فشل حذف الإشعار: ' + (e.message || 'خطأ غير معروف'));
+      setStatusMessage({
+        type: 'error',
+        text: 'فشل حذف الإشعار: ' + (e?.message || 'خطأ غير معروف')
+      });
     } finally {
       setDeletingId(null);
     }
@@ -448,9 +496,9 @@ export const AdminNotifications: React.FC = () => {
                                 }`}
                               >
                                 <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <span className="font-bold text-xs truncate">{c.name}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                       c.source === 'account' 
                                         ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/50' 
                                         : 'bg-purple-950/80 text-purple-300 border border-purple-800/50'
@@ -458,13 +506,29 @@ export const AdminNotifications: React.FC = () => {
                                       {c.source === 'account' ? 'حساب مسجل' : 'عميل عقد'}
                                     </span>
                                   </div>
-                                  <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                                    {c.email} {c.phone ? `• ${c.phone}` : ''}
+                                  
+                                  {/* Email & Phone */}
+                                  <div className="text-[11px] text-slate-300 truncate mt-1 flex flex-wrap items-center gap-2">
+                                    {c.email ? (
+                                      <span className="text-blue-300 font-mono">البريد: {c.email}</span>
+                                    ) : (
+                                      <span className="text-slate-500">بدون بريد</span>
+                                    )}
+                                    {c.phone && <span className="text-slate-400 font-mono">• هاتف: {c.phone}</span>}
                                   </div>
+
+                                  {/* UID badge */}
+                                  {c.id && (
+                                    <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1.5 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800 w-fit">
+                                      <span className="text-slate-500 font-sans">معرّف UID:</span>
+                                      <span className="text-amber-300 select-all">{c.id}</span>
+                                    </div>
+                                  )}
+
                                   {c.projectNames && c.projectNames.length > 0 && (
-                                    <div className="text-[10px] text-blue-400/90 truncate mt-0.5 flex items-center gap-1">
+                                    <div className="text-[10px] text-blue-400/90 truncate mt-1 flex items-center gap-1">
                                       <FileText className="w-3 h-3 shrink-0" />
-                                      <span>مشروع: {c.projectNames.join('، ')}</span>
+                                      <span>المشروع: {c.projectNames.join('، ')}</span>
                                     </div>
                                   )}
                                 </div>
@@ -487,25 +551,87 @@ export const AdminNotifications: React.FC = () => {
                     /* MODE 2: Manual Direct Input */
                     <div className="space-y-3">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                          البريد الإلكتروني للعميل المستلم <span className="text-red-400">*</span>
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-slate-300">
+                            البريد الإلكتروني أو معرّف الحساب (UID) للمستلم <span className="text-red-400">*</span>
+                          </label>
+                          {lookingUpClient && (
+                            <span className="text-[10px] text-blue-400 flex items-center gap-1">
+                              <span className="inline-block w-2.5 h-2.5 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                              <span>جاري البحث في الحسابات...</span>
+                            </span>
+                          )}
+                        </div>
                         <div className="relative">
                           <input
-                            type="email"
+                            type="text"
                             required
                             value={manualEmail}
                             onChange={(e) => setManualEmail(e.target.value)}
-                            placeholder="client@example.com"
-                            className="w-full pl-3 pr-8 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500 dir-ltr text-left"
+                            placeholder="اكتب البريد (client@example.com) أو الـ UID"
+                            className="w-full pl-3 pr-8 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500 dir-ltr text-left font-mono"
                           />
                           <Mail className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
                         </div>
                       </div>
 
+                      {/* Live Client Found Card */}
+                      {detectedClient ? (
+                        <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-800/80 text-xs animate-in fade-in duration-200">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-emerald-300 font-bold">{detectedClient.name}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">
+                                    {detectedClient.source === 'account' ? 'حساب مسجل بالمنظومة' : 'عميل عقد مسجل'}
+                                  </span>
+                                </div>
+                                
+                                {detectedClient.email && (
+                                  <p className="text-[11px] text-blue-300 font-mono mt-0.5">
+                                    البريد: {detectedClient.email}
+                                  </p>
+                                )}
+
+                                {detectedClient.id && (
+                                  <p className="text-[10px] text-amber-300 font-mono mt-0.5 select-all">
+                                    معرّف UID: {detectedClient.id}
+                                  </p>
+                                )}
+
+                                {detectedClient.projectNames && detectedClient.projectNames.length > 0 && (
+                                  <p className="text-[11px] text-slate-300 mt-1">
+                                    المشروع: <strong>{detectedClient.projectNames.join('، ')}</strong>
+                                  </p>
+                                )}
+                                {detectedClient.phone && (
+                                  <p className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                    الهاتف: {detectedClient.phone}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setManualName(detectedClient.name)}
+                              className="text-[10px] text-emerald-400 hover:underline px-2 py-1 rounded bg-emerald-900/40 border border-emerald-700/40 shrink-0"
+                            >
+                              تطبيق الاسم
+                            </button>
+                          </div>
+                        </div>
+                      ) : manualEmail.length >= 4 && !lookingUpClient ? (
+                        <div className="p-2.5 rounded-lg bg-blue-950/30 border border-blue-900/50 text-[11px] text-blue-300 flex items-center gap-2">
+                          <AlertCircle className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span>سيتم توجيه الإشعار الداخلي إلى هذا البريد/المعرّف مباشرة.</span>
+                        </div>
+                      ) : null}
+
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                          اسم العميل (اختياري للعرض)
+                          اسم العميل المستلم (يظهر في نص الرسالة)
                         </label>
                         <input
                           type="text"
@@ -740,6 +866,20 @@ export const AdminNotifications: React.FC = () => {
                             <span>{notif.recipientName || notif.recipientEmail || notif.recipientId}</span>
                           </span>
                         )}
+
+                        {/* Read status indicator */}
+                        {notif.read ? (
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 text-[10px] font-bold flex items-center gap-1" title={notif.readAt ? `تمت القراءة بتاريخ: ${new Date(notif.readAt).toLocaleString('ar-LY')}` : 'تمت القراءة'}>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span>تمت القراءة</span>
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-800/90 text-slate-400 border border-slate-700 text-[10px] font-medium flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-slate-500" />
+                            <span>لم تُقرأ بعد</span>
+                          </span>
+                        )}
+
                         <span className="text-[10px] text-slate-500">
                           {new Date(notif.createdAt).toLocaleDateString('ar-LY', {
                             day: 'numeric',
@@ -752,20 +892,42 @@ export const AdminNotifications: React.FC = () => {
 
                       <div className="flex items-center gap-1">
                         <button
+                          type="button"
                           onClick={() => setPreviewNotif(notif)}
-                          className="p-1 rounded-md text-slate-400 hover:text-blue-400 hover:bg-slate-800"
+                          className="p-1.5 rounded-md text-slate-400 hover:text-blue-400 hover:bg-slate-800"
                           title="معاينة"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => handleDelete(notif.notificationId)}
-                          disabled={deletingId === notif.notificationId}
-                          className="p-1 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-800 disabled:opacity-50"
-                          title="حذف"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        
+                        {confirmDeleteId === notif.notificationId ? (
+                          <div className="flex items-center gap-1 bg-red-950/90 border border-red-800/80 rounded-lg p-1 animate-in fade-in zoom-in-95 duration-100">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(notif.notificationId)}
+                              disabled={deletingId === notif.notificationId}
+                              className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold transition-colors disabled:opacity-50"
+                            >
+                              {deletingId === notif.notificationId ? 'جاري...' : 'تأكيد الحذف'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition-colors"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(notif.notificationId)}
+                            className="p-1.5 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                            title="حذف الإشعار"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
 

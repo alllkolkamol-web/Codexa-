@@ -5,7 +5,8 @@ import {
   getContractById, 
   uploadContractRecording, 
   approveContract, 
-  markContractDownloaded 
+  markContractDownloaded,
+  getLocalContractsList
 } from '../services/contractService';
 import { generateContractPDF } from '../utils/pdfGenerator';
 import { OfficialContractModal } from '../components/OfficialContractModal';
@@ -24,7 +25,8 @@ import {
   CheckSquare,
   Clock,
   Sparkles,
-  Eye
+  Eye,
+  Lock
 } from 'lucide-react';
 
 interface ContractViewProps {
@@ -61,6 +63,11 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
   const [downloadingPDF, setDownloadingPDF] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
+  const [enteredPassword, setEnteredPassword] = useState('');
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [passwordError, setPasswordError] = useState(false);
+  const [showMicPrompt, setShowMicPrompt] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerIntervalRef = useRef<any>(null);
@@ -75,6 +82,24 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
   const loadContract = async () => {
     setLoading(true);
     setError(null);
+
+    // 1. Instant access from local cache if exists
+    const local = getLocalContractsList().find(c => c.contractId === contractId);
+    if (local) {
+      setContract(local);
+      setLoading(false); // Switch to content view immediately
+      
+      // Setup audio state from local
+      if (local.recordingUrl) {
+        setAudioUrl(local.recordingUrl);
+        setRecordingSuccess(true);
+        setHasReadContract(true);
+        if (local.recordingDuration) setRecordingDuration(local.recordingDuration);
+        if (local.transcript) setLiveTranscript(local.transcript);
+      }
+    }
+
+    // 2. Fetch fresh data from Firestore
     try {
       const data = await getContractById(
         contractId, 
@@ -82,6 +107,7 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
         isAdmin, 
         currentUser?.email || undefined
       );
+      
       setContract(data);
       if (data.recordingUrl) {
         setAudioUrl(data.recordingUrl);
@@ -91,7 +117,9 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
         if (data.transcript) setLiveTranscript(data.transcript);
       }
     } catch (err: any) {
-      setError(err.message || 'تعذر تحميل بيانات العقد.');
+      if (!local) {
+        setError(err.message || 'تعذر تحميل بيانات العقد.');
+      }
     } finally {
       setLoading(false);
     }
@@ -103,7 +131,21 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
       setRecordingError('يرجى تأكيد قراءة العقد والشروط أولاً بتفعيل المربع أعلاه.');
       return;
     }
+    
+    // Show Codexa permission request first
+    setShowMicPrompt(true);
+  };
+
+  const triggerActualRecording = async () => {
+    setShowMicPrompt(false);
     setRecordingError(null);
+    
+    // Check for secure context (required for getUserMedia)
+    if (!window.isSecureContext) {
+      setRecordingError('يجب تشغيل الموقع عبر اتصال آمن (HTTPS) لاستخدام الميكروفون.');
+      return;
+    }
+
     audioChunksRef.current = [];
     setAudioBlob(null);
     setAudioUrl(null);
@@ -125,10 +167,15 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
       }
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setRecordingError('عذراً، تم رفض الوصول للميكروفون. يرجى الضغط على أيقونة القفل في شريط المتصفح وتفعيل الميكروفون ثم تحديث الصفحة.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      const errName = err.name || '';
+      const errMsg = err.message || '';
+      
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError' || errMsg.toLowerCase().includes('denied')) {
+        setRecordingError('عذراً، تم رفض الوصول للميكروفون. يرجى الضغط على أيقونة القفل (أو الإعدادات) في شريط المتصفح، ثم تفعيل الميكروفون وإعادة تحميل الصفحة.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
         setRecordingError('لم يتم العثور على ميكروفون متصل بجهازك. يرجى التأكد من توصيل الميكروفون والمحاولة مجدداً.');
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setRecordingError('الميكروفون قيد الاستخدام من قبل تطبيق آخر. يرجى إغلاق التطبيقات الأخرى والمحاولة مجدداً.');
       } else {
         setRecordingError('يجب السماح باستخدام الميكروفون من إعدادات المتصفح لتسجيل إقرار قراءة العقد.');
       }
@@ -254,15 +301,19 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
     setRecordingError(null);
     try {
       const declaration = contract.declarationText || DEFAULT_DECLARATION_TEXT;
+      const transcriptToUse = liveTranscript || declaration;
+      
+      // Perform upload
       const res = await uploadContractRecording(
         contract.contractId,
         currentUser?.uid || null,
         audioBlob,
         recordingDuration,
         contract.contractCode,
-        liveTranscript || declaration
+        transcriptToUse
       );
 
+      // Instant UI Update
       setRecordingSuccess(true);
       setContract({
         ...contract,
@@ -272,7 +323,7 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
         recordingStatus: 'uploaded',
         status: 'pending_review',
         verificationStatus: res.verificationStatus,
-        transcript: liveTranscript || declaration,
+        transcript: transcriptToUse,
       });
     } catch (err: any) {
       // Point 26: Exact error message
@@ -313,24 +364,27 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
       // 1. Generate client-side PDF document & obtain Blob
       const pdfBlob = await generateContractPDF(contract);
 
-      // 2. Upload to Storage and transition status to 'downloaded'
-      await markContractDownloaded(
+      // 2. Show success state and modal immediately after generation
+      setShowDocModal(true);
+      
+      // Update local state for immediate feedback
+      const now = new Date().toISOString();
+      setContract({
+        ...contract,
+        status: 'downloaded',
+        downloadedAt: now,
+      });
+
+      // 3. Perform background upload and firestore sync without blocking UI
+      markContractDownloaded(
         contract.contractId, 
         contract.projectName, 
         contract.contractCode,
         pdfBlob
-      );
+      ).catch(bgErr => console.warn("Background PDF sync warning:", bgErr));
 
-      // 3. Open modal only after successful generation to show the document
-      setShowDocModal(true);
-
-      setContract({
-        ...contract,
-        status: 'downloaded',
-        downloadedAt: new Date().toISOString(),
-      });
     } catch (err) {
-      console.error("PDF generation or upload error:", err);
+      console.error("PDF generation error:", err);
       setPdfError("حدث خطأ أثناء محاولة سحب العقد. يرجى المحاولة مرة أخرى.");
     } finally {
       setDownloadingPDF(false);
@@ -368,6 +422,69 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
   const hasAudioUploaded = !!contract.recordingUrl || recordingSuccess;
   const statusStyle = STATUS_COLORS[contract.status] || STATUS_COLORS.draft;
   const declarationText = contract.declarationText || DEFAULT_DECLARATION_TEXT;
+
+  // Password Verification UI
+  if (!isAuthorized && contract.accessPassword && !isAdmin) {
+    return (
+      <div className="py-16 max-w-lg mx-auto px-4">
+        <div className="bg-[#0c1328] rounded-2xl border border-slate-800 p-8 shadow-2xl text-center">
+          <div className="w-16 h-16 rounded-full bg-blue-900/30 text-blue-400 flex items-center justify-center mx-auto mb-6 border border-blue-800/50">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2">العقد محمي بكلمة مرور</h2>
+          <p className="text-xs text-slate-400 mb-8 leading-relaxed">
+            يرجى إدخال كلمة المرور الممنوحة لك من قبل إدارة Codexa للوصول إلى تفاصيل هذا العقد.
+          </p>
+
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (enteredPassword.trim() === contract.accessPassword) {
+                setIsAuthorized(true);
+                setPasswordError(false);
+              } else {
+                setPasswordError(true);
+              }
+            }}
+            className="space-y-4"
+          >
+            <div>
+              <input
+                type="text"
+                autoFocus
+                value={enteredPassword}
+                onChange={(e) => {
+                  setEnteredPassword(e.target.value);
+                  setPasswordError(false);
+                }}
+                placeholder="أدخل رمز الدخول هنا..."
+                className={`w-full px-4 py-3 rounded-xl bg-slate-900 border ${passwordError ? 'border-red-500' : 'border-slate-700'} text-white text-center font-bold tracking-widest focus:outline-none focus:border-blue-500 transition-colors`}
+              />
+              {passwordError && (
+                <p className="text-[10px] text-red-400 mt-2 font-bold animate-pulse">✓ كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى.</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-lg shadow-blue-700/20 transition-all flex items-center justify-center gap-2"
+            >
+              <CheckSquare className="w-4 h-4" />
+              <span>دخول وتأكيد الرمز</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onBack}
+              className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+            >
+              إلغاء والرجوع
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-8 max-w-4xl mx-auto px-4 sm:px-6">
@@ -772,6 +889,45 @@ export const ContractView: React.FC<ContractViewProps> = ({ contractId, onBack }
           onClose={() => setShowDocModal(false)}
           onStatusUpdate={(updated) => setContract(updated)}
         />
+      )}
+
+      {/* Codexa Microphone Permission Request Modal */}
+      {showMicPrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-[#0c1328] rounded-3xl border border-blue-900/40 p-8 max-w-md w-full shadow-2xl text-center scale-in-center">
+            <div className="w-20 h-20 rounded-full bg-blue-600/20 flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
+              <Mic className="w-10 h-10 text-blue-400 animate-pulse" />
+            </div>
+            
+            <h2 className="text-xl font-bold text-white mb-3">طلب إذن الميكروفون</h2>
+            <div className="bg-blue-950/40 rounded-2xl p-4 mb-6 border border-blue-800/30">
+              <p className="text-sm text-slate-200 leading-relaxed">
+                تطلب شركة <span className="text-blue-400 font-bold">Codexa</span> الوصول إلى الميكروفون الخاص بك لتسجيل إقرارك الصوتي وتوثيق موافقتك على العقد بشكل رسمي.
+              </p>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={triggerActualRecording}
+                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-base shadow-xl shadow-blue-700/20 transition-all flex items-center justify-center gap-2 active:scale-95"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                <span>سماح لشركة Codexa</span>
+              </button>
+              
+              <button
+                onClick={() => setShowMicPrompt(false)}
+                className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+            
+            <p className="mt-6 text-[10px] text-slate-500">
+              سيطلب المتصفح إذن الوصول الفعلي بعد ضغطك على زر السماح أعلاه.
+            </p>
+          </div>
+        </div>
       )}
 
     </div>

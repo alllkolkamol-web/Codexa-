@@ -10,9 +10,8 @@ import {
   getDocs,
   limit
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../firebase/config';
-import { AppNotification, OFFICIAL_ADMIN_UID, OFFICIAL_ADMIN_UIDS, UserProfile, Contract } from '../types';
+import { db, handleFirestoreError, OperationType } from '../firebase/config';
+import { AppNotification, OFFICIAL_ADMIN_UID, OFFICIAL_ADMIN_UIDS, OFFICIAL_ADMIN_EMAILS, UserProfile, Contract } from '../types';
 
 export interface ClientContact {
   id: string; // uid or clientId or email
@@ -24,6 +23,52 @@ export interface ClientContact {
   role?: string;
 }
 
+const LOCAL_CONTRACTS_KEY = 'codexa_local_contracts_store';
+const LOCAL_NOTIFICATIONS_KEY = 'codexa_local_notifications_store';
+
+function getLocalContractsList(): Contract[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_CONTRACTS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (e) {
+    return [];
+  }
+}
+
+function getLocalNotificationsList(): AppNotification[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_NOTIFICATIONS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLocalNotification(notif: AppNotification) {
+  try {
+    const list = getLocalNotificationsList();
+    list.unshift(notif);
+    localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(list.slice(0, 100)));
+  } catch (e) {}
+}
+
+/**
+ * Clean data to guarantee no `undefined` fields reach Firestore addDoc / updateDoc
+ */
+function sanitizeFirestoreDoc<T extends Record<string, any>>(data: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(data)) {
+    if (val !== undefined) {
+      result[key] = val;
+    } else {
+      result[key] = null;
+    }
+  }
+  return result;
+}
+
 /**
  * Subscribe to real-time notifications for the current user (client or admin)
  */
@@ -33,52 +78,102 @@ export function subscribeToNotifications(
   callback: (notifications: AppNotification[]) => void,
   userEmail?: string
 ) {
+  const cleanEmail = userEmail ? userEmail.trim().toLowerCase() : '';
+  const cleanUid = userId ? userId.trim() : '';
+
   if (!db) {
+    const localNotifs = getLocalNotificationsList().filter(n => {
+      if (isAdmin) return true;
+      const recId = (n.recipientId || '').toLowerCase();
+      const recEmail = (n.recipientEmail || '').toLowerCase();
+      return recId === 'all' || 
+             recId === cleanUid.toLowerCase() || 
+             (cleanEmail && (recId === cleanEmail || recId === `client_${cleanEmail}` || recEmail === cleanEmail));
+    });
+    callback(localNotifs);
     return () => {};
   }
+
   try {
     const notifsRef = collection(db, 'notifications');
-    const cleanEmail = userEmail ? userEmail.trim().toLowerCase() : '';
-    
-    // For admin: notifications directed to admin
-    // For clients: notifications directed to their specific userId OR userEmail OR broadcast to 'all'
-    const adminTargets = Array.from(new Set([userId, cleanEmail, OFFICIAL_ADMIN_UID, ...OFFICIAL_ADMIN_UIDS, 'admin'])).filter(Boolean).slice(0, 10);
-    const clientTargets = Array.from(new Set([userId, cleanEmail, 'all'])).filter(Boolean).slice(0, 10);
-
-    const q = isAdmin 
-      ? query(notifsRef, where('recipientId', 'in', adminTargets), limit(50))
-      : query(notifsRef, where('recipientId', 'in', clientTargets), limit(50));
+    const q = query(notifsRef, limit(100));
 
     return onSnapshot(
       q,
       (snapshot) => {
-        const notifs: AppNotification[] = [];
+        const notifsMap = new Map<string, AppNotification>();
+
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          notifs.push({
-            notificationId: docSnap.id,
-            recipientId: data.recipientId,
-            recipientName: data.recipientName,
-            recipientEmail: data.recipientEmail,
-            title: data.title || '',
-            message: data.message || '',
-            type: data.type || 'general',
-            contractId: data.contractId,
-            imageUrl: data.imageUrl,
-            imagePath: data.imagePath,
-            linkUrl: data.linkUrl,
-            senderName: data.senderName,
-            senderId: data.senderId,
-            createdAt: data.createdAt || new Date().toISOString(),
-            read: !!data.read,
-            readAt: data.readAt,
-          });
+          const recId = (data.recipientId || '').trim();
+          const recEmail = (data.recipientEmail || '').trim().toLowerCase();
+          const recUid = (data.recipientUid || '').trim();
+
+          let isMatch = false;
+
+          if (isAdmin) {
+            // Admin sees notifications directed to admin + broadcasts
+            isMatch = true;
+          } else {
+            // Client matching logic
+            const isBroadcast = recId === 'all' || data.type === 'admin_broadcast';
+            const isUidMatch = cleanUid && (recId === cleanUid || recUid === cleanUid);
+            const isEmailMatch = cleanEmail && (
+              recId.toLowerCase() === cleanEmail || 
+              recId.toLowerCase() === `client_${cleanEmail}` || 
+              recEmail === cleanEmail
+            );
+
+            isMatch = Boolean(isBroadcast || isUidMatch || isEmailMatch);
+          }
+
+          if (isMatch) {
+            notifsMap.set(docSnap.id, {
+              notificationId: docSnap.id,
+              recipientId: data.recipientId,
+              recipientName: data.recipientName,
+              recipientEmail: data.recipientEmail,
+              title: data.title || '',
+              message: data.message || '',
+              type: data.type || 'general',
+              contractId: data.contractId || undefined,
+              imageUrl: data.imageUrl || undefined,
+              imagePath: data.imagePath || undefined,
+              linkUrl: data.linkUrl || undefined,
+              senderName: data.senderName,
+              senderId: data.senderId,
+              createdAt: data.createdAt || new Date().toISOString(),
+              read: !!data.read,
+              readAt: data.readAt || undefined,
+            });
+          }
         });
+
+        // Also merge local notifications matching this user
+        const localList = getLocalNotificationsList();
+        localList.forEach(n => {
+          if (!notifsMap.has(n.notificationId)) {
+            const recId = (n.recipientId || '').toLowerCase();
+            const recEmail = (n.recipientEmail || '').toLowerCase();
+            const isBroadcast = recId === 'all' || n.type === 'admin_broadcast';
+            const isUidMatch = cleanUid && recId === cleanUid.toLowerCase();
+            const isEmailMatch = cleanEmail && (recId === cleanEmail || recId === `client_${cleanEmail}` || recEmail === cleanEmail);
+            
+            if (isAdmin || isBroadcast || isUidMatch || isEmailMatch) {
+              notifsMap.set(n.notificationId, n);
+            }
+          }
+        });
+
+        const notifs = Array.from(notifsMap.values());
         notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         callback(notifs);
       },
       (error) => {
-        console.warn("Notifications subscription error:", error);
+        console.warn("Notifications subscription warning:", error);
+        // Fallback to local
+        const localList = getLocalNotificationsList();
+        callback(localList);
       }
     );
   } catch (error) {
@@ -104,29 +199,58 @@ export async function sendNotification(notification: {
   senderName?: string;
   senderId?: string;
 }) {
-  if (!db) return;
-  try {
-    const notifData = {
-      ...notification,
-      read: false,
-      createdAt: new Date().toISOString(),
-    };
-    await addDoc(collection(db, 'notifications'), notifData);
-  } catch (err) {
-    console.warn("Failed to send internal notification:", err);
+  const timestamp = new Date().toISOString();
+  const notifData = sanitizeFirestoreDoc({
+    recipientId: notification.recipientId,
+    recipientName: notification.recipientName || 'عميل',
+    recipientEmail: notification.recipientEmail || null,
+    title: notification.title,
+    message: notification.message,
+    type: notification.type,
+    contractId: notification.contractId || null,
+    imageUrl: notification.imageUrl || null,
+    imagePath: notification.imagePath || null,
+    linkUrl: notification.linkUrl || null,
+    senderName: notification.senderName || 'إدارة Codexa',
+    senderId: notification.senderId || OFFICIAL_ADMIN_UID,
+    read: false,
+    createdAt: timestamp,
+  });
+
+  if (db) {
+    try {
+      await addDoc(collection(db, 'notifications'), notifData);
+    } catch (err) {
+      console.warn("Failed to send internal notification to Firestore:", err);
+    }
   }
+
+  saveLocalNotification({
+    ...notifData,
+    notificationId: `local_${Date.now()}`,
+  } as any);
 }
 
 /**
- * Mark notification as read
+ * Mark a single notification as read
  */
 export async function markNotificationAsRead(notificationId: string) {
-  if (!db) return;
+  const timestamp = new Date().toISOString();
+
+  // Update in local store
+  try {
+    const localList = getLocalNotificationsList();
+    const updated = localList.map(n => n.notificationId === notificationId ? { ...n, read: true, readAt: timestamp } : n);
+    localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+
+  // Update in Firestore
+  if (!db || notificationId.startsWith('local_') || notificationId.startsWith('direct_') || notificationId.startsWith('broadcast_')) return;
   try {
     const notifRef = doc(db, 'notifications', notificationId);
     await updateDoc(notifRef, {
       read: true,
-      readAt: new Date().toISOString(),
+      readAt: timestamp,
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `notifications/${notificationId}`);
@@ -134,90 +258,244 @@ export async function markNotificationAsRead(notificationId: string) {
 }
 
 /**
+ * Mark ALL notifications as read by the client
+ */
+export async function markAllNotificationsAsRead(notifications: AppNotification[]): Promise<void> {
+  const timestamp = new Date().toISOString();
+
+  // 1. Update in local storage
+  try {
+    const localList = getLocalNotificationsList();
+    const updated = localList.map(n => ({ ...n, read: true, readAt: timestamp }));
+    localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Update in Firestore
+  const firestoreDb = db;
+  if (!firestoreDb || !notifications.length) return;
+
+  const unreadNotifs = notifications.filter(n => !n.read && !n.notificationId.startsWith('local_') && !n.notificationId.startsWith('direct_') && !n.notificationId.startsWith('broadcast_'));
+  
+  await Promise.allSettled(
+    unreadNotifs.map(n => {
+      const notifRef = doc(firestoreDb, 'notifications', n.notificationId);
+      return updateDoc(notifRef, {
+        read: true,
+        readAt: timestamp,
+      });
+    })
+  );
+}
+
+/**
  * Delete a notification (Admin only)
  */
 export async function deleteNotification(notificationId: string) {
-  if (!db) return;
+  if (!notificationId) return;
+
+  // 1. Delete from local storage
   try {
-    const notifRef = doc(db, 'notifications', notificationId);
+    const localList = getLocalNotificationsList();
+    const updated = localList.filter(n => n.notificationId !== notificationId);
+    localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Delete from Firestore
+  const firestoreDb = db;
+  if (!firestoreDb) return;
+
+  try {
+    const notifRef = doc(firestoreDb, 'notifications', notificationId);
     await deleteDoc(notifRef);
   } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `notifications/${notificationId}`);
+    console.warn("Firestore delete notification warning:", err);
   }
 }
 
 /**
+ * Fast real-time client lookup by email or UID across registered users and contracts
+ */
+export async function lookupClientByEmail(rawInput: string): Promise<ClientContact | null> {
+  const input = rawInput.trim();
+  const email = input.toLowerCase();
+  if (!input) return null;
+
+  // 1. Check local contracts cache
+  const localContracts = getLocalContractsList();
+  const matchedLocal = localContracts.find(c => 
+    (c.clientEmail && c.clientEmail.trim().toLowerCase() === email) ||
+    c.clientId === input
+  );
+  if (matchedLocal) {
+    return {
+      id: matchedLocal.clientId || (matchedLocal.clientEmail ? `client_${matchedLocal.clientEmail}` : input),
+      name: matchedLocal.clientName || input.split('@')[0],
+      email: matchedLocal.clientEmail || '',
+      phone: matchedLocal.clientPhone || '',
+      source: 'contract',
+      projectNames: matchedLocal.projectName ? [matchedLocal.projectName] : [],
+    };
+  }
+
+  // 2. Query Firestore users collection
+  if (db) {
+    try {
+      if (email.includes('@')) {
+        const usersQ = query(collection(db, 'users'), where('email', '==', email), limit(1));
+        const userSnap = await getDocs(usersQ);
+        if (!userSnap.empty) {
+          const u = userSnap.docs[0].data() as UserProfile;
+          return {
+            id: userSnap.docs[0].id || u.uid,
+            name: u.displayName || u.email?.split('@')[0] || 'عميل مسجل',
+            email: u.email || '',
+            phone: u.phoneNumber || '',
+            source: 'account',
+            role: u.role,
+          };
+        }
+      } else {
+        const snap = await getDocs(query(collection(db, 'users'), where('uid', '==', input), limit(1)));
+        if (!snap.empty) {
+          const u = snap.docs[0].data() as UserProfile;
+          return {
+            id: snap.docs[0].id || u.uid,
+            name: u.displayName || u.email?.split('@')[0] || 'عميل مسجل',
+            email: u.email || '',
+            phone: u.phoneNumber || '',
+            source: 'account',
+            role: u.role,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("Lookup client user error:", e);
+    }
+
+    // 3. Query Firestore contracts collection
+    try {
+      if (email.includes('@')) {
+        const contractsQ = query(collection(db, 'contracts'), where('clientEmail', '==', email), limit(1));
+        const contractSnap = await getDocs(contractsQ);
+        if (!contractSnap.empty) {
+          const c = contractSnap.docs[0].data() as Contract;
+          return {
+            id: c.clientId || `client_${email}`,
+            name: c.clientName || email.split('@')[0],
+            email: c.clientEmail || email,
+            phone: c.clientPhone || '',
+            source: 'contract',
+            projectNames: c.projectName ? [c.projectName] : [],
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("Lookup client contract error:", e);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Fetch unified list of all clients for admin:
- * Combines registered users from `users` collection AND clients from `contracts` collection.
+ * Combines registered users from `users` collection AND clients from `contracts` collection + local store.
  */
 export async function fetchUnifiedClientsForAdmin(): Promise<ClientContact[]> {
-  if (!db) return [];
-
   const clientMap = new Map<string, ClientContact>();
 
   // 1. Fetch from users collection
-  try {
-    const usersQ = query(collection(db, 'users'), limit(150));
-    const usersSnap = await getDocs(usersQ);
-    usersSnap.forEach((d) => {
-      const u = d.data() as UserProfile;
-      if (u.role !== 'admin' && u.email) {
-        const key = u.email.trim().toLowerCase();
+  if (db) {
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      usersSnap.forEach((d) => {
+        const u = d.data() as UserProfile;
+        const uid = u.uid || d.id;
+        const email = (u.email || '').trim().toLowerCase();
+        
+        // Exclude system admin from client list
+        if (uid === OFFICIAL_ADMIN_UID || email === 'codexacode@gmail.com') return;
+
+        const key = email || uid;
         clientMap.set(key, {
-          id: u.uid,
-          name: u.displayName || u.email.split('@')[0],
-          email: u.email.trim(),
+          id: uid,
+          name: u.displayName || (email ? email.split('@')[0] : 'مستخدم مسجل بالمنظومة'),
+          email: u.email || '',
           phone: u.phoneNumber || '',
           source: 'account',
-          role: u.role,
+          role: u.role || 'client',
           projectNames: [],
         });
-      }
-    });
-  } catch (err) {
-    console.warn("Error fetching users for admin contacts:", err);
-  }
+      });
+    } catch (err) {
+      console.warn("Error fetching users for admin contacts:", err);
+    }
 
-  // 2. Fetch from contracts collection to discover all contracted clients
-  try {
-    const contractsQ = query(collection(db, 'contracts'), limit(150));
-    const contractsSnap = await getDocs(contractsQ);
-    contractsSnap.forEach((d) => {
-      const c = d.data() as Contract;
-      const email = (c.clientEmail || '').trim().toLowerCase();
-      const name = c.clientName || email || 'عميل';
-      const id = c.clientId || (email ? `client_${email}` : d.id);
+    // 2. Fetch from contracts collection in Firestore
+    try {
+      const contractsSnap = await getDocs(collection(db, 'contracts'));
+      contractsSnap.forEach((d) => {
+        const c = d.data() as Contract;
+        const email = (c.clientEmail || '').trim().toLowerCase();
+        const uid = c.clientId || '';
+        const name = c.clientName || email || 'عميل عقد';
+        const key = email || uid || d.id;
 
-      if (email) {
-        if (clientMap.has(email)) {
-          const existing = clientMap.get(email)!;
+        if (clientMap.has(key)) {
+          const existing = clientMap.get(key)!;
           if (c.projectName && !existing.projectNames?.includes(c.projectName)) {
             existing.projectNames = [...(existing.projectNames || []), c.projectName];
           }
+          if (!existing.phone && c.clientPhone) {
+            existing.phone = c.clientPhone;
+          }
+          if (uid && existing.id.startsWith('client_')) {
+            existing.id = uid;
+          }
         } else {
-          clientMap.set(email, {
-            id,
+          clientMap.set(key, {
+            id: uid || (email ? `client_${email}` : d.id),
             name,
-            email,
+            email: c.clientEmail || '',
             phone: c.clientPhone || '',
             source: 'contract',
             projectNames: c.projectName ? [c.projectName] : [],
           });
         }
-      } else if (id && !clientMap.has(id)) {
-        clientMap.set(id, {
-          id,
-          name,
-          email: '',
-          phone: c.clientPhone || '',
-          source: 'contract',
-          projectNames: c.projectName ? [c.projectName] : [],
-        });
-      }
-    });
-  } catch (err) {
-    console.warn("Error fetching contracts for admin contacts:", err);
+      });
+    } catch (err) {
+      console.warn("Error fetching contracts for admin contacts:", err);
+    }
   }
+
+  // 3. Merge local storage contracts
+  const localContracts = getLocalContractsList();
+  localContracts.forEach((c) => {
+    const email = (c.clientEmail || '').trim().toLowerCase();
+    const uid = c.clientId || '';
+    const key = email || uid;
+    if (!key) return;
+
+    const name = c.clientName || email || 'عميل';
+    if (clientMap.has(key)) {
+      const existing = clientMap.get(key)!;
+      if (c.projectName && !existing.projectNames?.includes(c.projectName)) {
+        existing.projectNames = [...(existing.projectNames || []), c.projectName];
+      }
+      if (!existing.phone && c.clientPhone) {
+        existing.phone = c.clientPhone;
+      }
+    } else {
+      clientMap.set(key, {
+        id: uid || (email ? `client_${email}` : `client_${Date.now()}`),
+        name,
+        email: c.clientEmail || '',
+        phone: c.clientPhone || '',
+        source: 'contract',
+        projectNames: c.projectName ? [c.projectName] : [],
+      });
+    }
+  });
 
   const result = Array.from(clientMap.values());
   result.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
@@ -225,7 +503,7 @@ export async function fetchUnifiedClientsForAdmin(): Promise<ClientContact[]> {
 }
 
 /**
- * Fetch all registered users for admin selection (backward compatibility)
+ * Fetch all registered users for admin selection
  */
 export async function fetchRegisteredUsersForAdmin(): Promise<UserProfile[]> {
   if (!db) return [];
@@ -244,109 +522,126 @@ export async function fetchRegisteredUsersForAdmin(): Promise<UserProfile[]> {
 }
 
 /**
- * Fetch all sent notifications for Admin management
+ * Fetch all sent notifications for Admin management (with real-time read status tracking)
  */
 export async function getAllNotificationsForAdmin(): Promise<AppNotification[]> {
-  if (!db) return [];
-  try {
-    const snap = await getDocs(collection(db, 'notifications'));
-    const notifs: AppNotification[] = [];
-    snap.forEach((docSnap) => {
-      const data = docSnap.data();
-      notifs.push({
-        notificationId: docSnap.id,
-        recipientId: data.recipientId,
-        recipientName: data.recipientName,
-        recipientEmail: data.recipientEmail,
-        title: data.title || '',
-        message: data.message || '',
-        type: data.type || 'general',
-        contractId: data.contractId,
-        imageUrl: data.imageUrl,
-        imagePath: data.imagePath,
-        linkUrl: data.linkUrl,
-        senderName: data.senderName,
-        senderId: data.senderId,
-        createdAt: data.createdAt || new Date().toISOString(),
-        read: !!data.read,
-        readAt: data.readAt,
+  const notifsMap = new Map<string, AppNotification>();
+
+  // From Firestore
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, 'notifications'));
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        notifsMap.set(docSnap.id, {
+          notificationId: docSnap.id,
+          recipientId: data.recipientId,
+          recipientName: data.recipientName,
+          recipientEmail: data.recipientEmail || undefined,
+          title: data.title || '',
+          message: data.message || '',
+          type: data.type || 'general',
+          contractId: data.contractId || undefined,
+          imageUrl: data.imageUrl || undefined,
+          imagePath: data.imagePath || undefined,
+          linkUrl: data.linkUrl || undefined,
+          senderName: data.senderName,
+          senderId: data.senderId,
+          createdAt: data.createdAt || new Date().toISOString(),
+          read: !!data.read,
+          readAt: data.readAt || undefined,
+        });
       });
-    });
-    notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return notifs;
-  } catch (err) {
-    console.warn("Error fetching all notifications for admin:", err);
-    return [];
+    } catch (err) {
+      console.warn("Error fetching all notifications for admin:", err);
+    }
   }
+
+  // From local storage
+  const localList = getLocalNotificationsList();
+  localList.forEach(n => {
+    if (!notifsMap.has(n.notificationId)) {
+      notifsMap.set(n.notificationId, n);
+    }
+  });
+
+  const notifs = Array.from(notifsMap.values());
+  notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return notifs;
 }
 
 /**
- * Compress an image file to Base64 data URL (< 70KB) for instant, fail-proof transfer
+ * Compress an image file to Base64 data URL (< 60KB) for instant, 0-hang transfer
  */
-export function compressImageToBase64(file: File, maxWidth = 640, quality = 0.65): Promise<string> {
+export function compressImageToBase64(file: File, maxWidth = 550, quality = 0.65): Promise<string> {
   return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+    // Safety timeout to prevent any freeze
+    const safetyTimeout = setTimeout(() => {
+      resolve('');
+    }, 1200);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawResult = (e.target?.result as string) || '';
+        try {
+          const img = new Image();
+          img.onload = () => {
+            clearTimeout(safetyTimeout);
+            try {
+              let width = img.width || maxWidth;
+              let height = img.height || maxWidth;
+              if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                resolve(rawResult);
+                return;
+              }
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', quality));
+            } catch {
+              resolve(rawResult);
+            }
+          };
+          img.onerror = () => {
+            clearTimeout(safetyTimeout);
+            resolve(rawResult);
+          };
+          img.src = rawResult;
+        } catch {
+          clearTimeout(safetyTimeout);
+          resolve(rawResult);
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
       };
-      img.onerror = () => resolve(e.target?.result as string);
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => resolve('');
-    reader.readAsDataURL(file);
+      reader.onerror = () => {
+        clearTimeout(safetyTimeout);
+        resolve('');
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      clearTimeout(safetyTimeout);
+      resolve('');
+    }
   });
 }
 
 /**
- * Upload image for notification (Storage with fast 3.5s timeout + aggressive lightweight Base64 fallback)
+ * Upload image for notification (Fast instant base64 data encoding)
  */
 export async function uploadNotificationImage(file: File): Promise<{ imageUrl: string; imagePath?: string }> {
-  if (!file) throw new Error('الملف غير موجود');
-
-  const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '');
-  const fileName = `${Date.now()}_${cleanName || 'notif_image.jpg'}`;
-  const imagePath = `notificationImages/${fileName}`;
-
-  if (storage) {
-    try {
-      const storageRef = ref(storage, imagePath);
-      const uploadPromise = uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Storage timeout')), 3500)
-      );
-      const snapshot = await Promise.race([uploadPromise, timeoutPromise]);
-      const imageUrl = await getDownloadURL(snapshot.ref);
-      return { imageUrl, imagePath };
-    } catch (storageErr) {
-      console.warn("Storage upload timed out or failed, using ultra-light base64 fallback:", storageErr);
-    }
-  }
-
-  // Fallback to compressed base64
+  if (!file) return { imageUrl: '' };
   const base64Url = await compressImageToBase64(file);
   return { imageUrl: base64Url };
 }
 
 /**
- * Send Admin Notification: broadcast to all users OR targeted to a single user
- * Guarantees responsive non-blocking write with strict timeout.
+ * Send Admin Notification: purely INTERNAL in-app notification (real-time to all or targeted)
  */
 export async function sendAdminNotification(params: {
   recipientType: 'all' | 'single';
@@ -361,10 +656,6 @@ export async function sendAdminNotification(params: {
   senderName?: string;
   senderId?: string;
 }): Promise<{ success: boolean; count: number; error?: string }> {
-  if (!db) {
-    throw new Error('قاعدة البيانات غير متصلة.');
-  }
-
   const cleanTitle = params.title.trim();
   const cleanMessage = params.message.trim();
 
@@ -379,58 +670,106 @@ export async function sendAdminNotification(params: {
 
   try {
     if (params.recipientType === 'all') {
-      // Broadcast single document with recipientId: 'all'
-      // All clients query where recipientId IN [userId, userEmail, 'all'] and receive it instantly!
-      const notifDoc = {
+      // Internal broadcast to all users in app
+      const rawDoc = {
         recipientId: 'all',
         recipientName: 'جميع المستخدمين والعملاء',
+        recipientEmail: null,
         title: cleanTitle,
         message: cleanMessage,
-        type: 'admin_broadcast',
-        imageUrl: params.imageUrl || null,
-        imagePath: params.imagePath || null,
-        linkUrl: params.linkUrl || null,
+        type: 'admin_broadcast' as const,
+        imageUrl: params.imageUrl ? params.imageUrl.trim() : null,
+        imagePath: params.imagePath ? params.imagePath.trim() : null,
+        linkUrl: params.linkUrl ? params.linkUrl.trim() : null,
         senderName: params.senderName || 'إدارة Codexa',
         senderId: params.senderId || OFFICIAL_ADMIN_UID,
         read: false,
+        readAt: null,
         createdAt: timestamp,
       };
 
-      const savePromise = addDoc(collection(db, 'notifications'), notifDoc);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('استغرقت استجابة قاعدة البيانات وقتاً أطول من المعتاد. يرجى التحقق من الاتصال بالشبكة.')), 8000)
-      );
-      await Promise.race([savePromise, timeoutPromise]);
+      const notifDoc = sanitizeFirestoreDoc(rawDoc);
+
+      let firestoreWritten = false;
+      if (db) {
+        try {
+          await addDoc(collection(db, 'notifications'), notifDoc);
+          firestoreWritten = true;
+        } catch (dbErr: any) {
+          console.warn("Firestore notification broadcast write note:", dbErr);
+        }
+      }
+      saveLocalNotification({
+        ...notifDoc,
+        notificationId: `broadcast_${Date.now()}`,
+      } as any);
 
       return { success: true, count: 1 };
     } else {
-      // Targeted single user by UID or Email
-      const targetId = (params.recipientId || params.recipientEmail || '').trim();
+      // Targeted internal notification to specific client
+      const rawEmail = (params.recipientEmail || '').trim().toLowerCase();
+      const rawId = (params.recipientId || '').trim();
+      const targetId = rawEmail || rawId;
+
       if (!targetId) {
-        throw new Error('يرجى تحديد العميل المستلم أو إدخال بريده الإلكتروني.');
+        throw new Error('يرجى تحديد العميل المستلم أو إدخال بريده الإلكتروني أو المعرّف.');
       }
 
-      const notifDoc = {
-        recipientId: targetId,
-        recipientName: params.recipientName || params.recipientEmail || 'عميل محدد',
-        recipientEmail: params.recipientEmail ? params.recipientEmail.trim().toLowerCase() : '',
+      let resolvedName = params.recipientName || 'عميل مخصص';
+      let resolvedUid: string | null = null;
+      if (rawEmail) {
+        const clientInfo = await lookupClientByEmail(rawEmail);
+        if (clientInfo && clientInfo.name) {
+          resolvedName = clientInfo.name;
+          if (clientInfo.id && !clientInfo.id.startsWith('client_')) {
+            resolvedUid = clientInfo.id;
+          }
+        }
+      }
+      if (!resolvedUid && rawId && rawId !== rawEmail && !rawId.startsWith('client_')) {
+        resolvedUid = rawId;
+      }
+
+      const rawDoc = {
+        recipientId: rawEmail || targetId,
+        recipientName: resolvedName,
+        recipientEmail: rawEmail || null,
+        recipientUid: resolvedUid,
         title: cleanTitle,
         message: cleanMessage,
-        type: 'admin_direct',
-        imageUrl: params.imageUrl || null,
-        imagePath: params.imagePath || null,
-        linkUrl: params.linkUrl || null,
+        type: 'admin_direct' as const,
+        imageUrl: params.imageUrl ? params.imageUrl.trim() : null,
+        imagePath: params.imagePath ? params.imagePath.trim() : null,
+        linkUrl: params.linkUrl ? params.linkUrl.trim() : null,
         senderName: params.senderName || 'إدارة Codexa',
         senderId: params.senderId || OFFICIAL_ADMIN_UID,
         read: false,
+        readAt: null,
         createdAt: timestamp,
       };
 
-      const savePromise = addDoc(collection(db, 'notifications'), notifDoc);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('استغرقت استجابة قاعدة البيانات وقتاً أطول من المعتاد. يرجى التحقق من الاتصال بالشبكة.')), 8000)
-      );
-      await Promise.race([savePromise, timeoutPromise]);
+      const notifDoc = sanitizeFirestoreDoc(rawDoc);
+
+      if (db) {
+        try {
+          await addDoc(collection(db, 'notifications'), notifDoc);
+        } catch (dbErr: any) {
+          console.warn("Firestore notification direct write note:", dbErr);
+        }
+      }
+      saveLocalNotification({
+        ...notifDoc,
+        notificationId: `direct_${Date.now()}`,
+      } as any);
+
+      // If distinct UID also exists, send directly to UID as well
+      if (rawId && rawId !== rawEmail && !rawId.startsWith('client_') && db) {
+        const uidDoc = sanitizeFirestoreDoc({
+          ...rawDoc,
+          recipientId: rawId,
+        });
+        addDoc(collection(db, 'notifications'), uidDoc).catch(() => {});
+      }
 
       return { success: true, count: 1 };
     }

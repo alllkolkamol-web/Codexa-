@@ -66,8 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUserProfile = async (user: User): Promise<UserProfile | null> => {
     const isOfficialAdmin = 
-      (user.uid === OFFICIAL_ADMIN_UID || OFFICIAL_ADMIN_UIDS.includes(user.uid)) &&
-      !!user.email && user.email.toLowerCase() === OFFICIAL_ADMIN_EMAIL.toLowerCase();
+      (user.uid === OFFICIAL_ADMIN_UID || OFFICIAL_ADMIN_UIDS.includes(user.uid)) ||
+      (!!user.email && OFFICIAL_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(user.email.toLowerCase()));
 
     const targetRole: UserRole = isOfficialAdmin ? 'admin' : 'client';
 

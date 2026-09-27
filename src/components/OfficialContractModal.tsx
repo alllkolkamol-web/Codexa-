@@ -180,7 +180,7 @@ export const OfficialContractModal: React.FC<OfficialContractModalProps> = ({
               <div>
                 <h1 className="text-2xl font-black tracking-wider text-white">CODEXA</h1>
                 <p className="text-xs text-blue-300 font-semibold mt-1">تطوير التطبيقات، المواقع والمنظومات البرمجية</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">الهاتف الرسمي: {OFFICIAL_PHONE}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">الهاتف الرسمي: <a href="https://wa.me/218920619363" target="_blank" rel="noreferrer" className="text-blue-300 hover:text-blue-100 transition-colors">{OFFICIAL_PHONE}</a></p>
               </div>
               <div className="bg-slate-800/80 border border-slate-700 px-4 py-2.5 rounded-lg text-center self-start sm:self-auto">
                 <span className="text-[10px] text-slate-400 block mb-0.5">كود العقد الرسمي</span>
@@ -275,7 +275,7 @@ export const OfficialContractModal: React.FC<OfficialContractModalProps> = ({
 
               {/* Footer */}
               <div className="pt-4 border-t border-slate-200 text-center text-[10px] text-slate-500">
-                منظومة العقود الإلكترونية الموحدة لشركة Codexa | كود العقد: {contract.contractCode} | الدعم: {OFFICIAL_PHONE}
+                منظومة العقود الإلكترونية الموحدة لشركة Codexa | كود العقد: {contract.contractCode} | الدعم: <a href="https://wa.me/218920619363" target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">{OFFICIAL_PHONE}</a>
               </div>
 
             </div>

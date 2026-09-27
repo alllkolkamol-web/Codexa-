@@ -268,12 +268,18 @@ export const AdminContractDetails: React.FC<AdminContractDetailsProps> = ({ cont
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">البريد الإلكتروني:</span>
-                <span className="font-mono text-blue-300" dir="ltr">{contract.clientEmail}</span>
+                <span className="font-mono text-blue-300" dir="ltr">{contract.clientEmail || 'غير متوفر'}</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">رقم الهاتف:</span>
                 <span className="font-mono text-slate-200" dir="ltr">{contract.clientPhone || 'غير مدخل'}</span>
               </div>
+              {contract.accessPassword && (
+                <div className="flex justify-between py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400">كلمة مرور الدخول للموقع:</span>
+                  <span className="font-mono text-amber-400 font-bold" dir="ltr">{contract.accessPassword}</span>
+                </div>
+              )}
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-400">UID العميل في النظام:</span>
                 <span className="font-mono text-[11px] text-slate-400" dir="ltr">{contract.clientId}</span>

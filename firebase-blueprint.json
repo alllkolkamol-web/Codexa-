@@ -89,6 +89,40 @@
         "readAt": { "type": "string" }
       },
       "required": ["notificationId", "recipientId", "title", "message", "type", "createdAt", "read"]
+    },
+    "Mail": {
+      "title": "Mail",
+      "description": "Outgoing email queue for contract status notifications",
+      "type": "object",
+      "properties": {
+        "to": { "type": "array", "items": { "type": "string" } },
+        "cc": { "type": "array", "items": { "type": "string" } },
+        "message": {
+          "type": "object",
+          "properties": {
+            "subject": { "type": "string" },
+            "text": { "type": "string" },
+            "html": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["to", "message", "createdAt"]
+    },
+    "EmailLog": {
+      "title": "EmailLog",
+      "description": "Execution logs for Cloud Functions email dispatch",
+      "type": "object",
+      "properties": {
+        "contractId": { "type": "string" },
+        "contractCode": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "newStatus": { "type": "string" },
+        "oldStatus": { "type": "string" },
+        "sentAt": { "type": "string" },
+        "success": { "type": "boolean" }
+      },
+      "required": ["contractId", "recipientEmail", "newStatus", "success"]
     }
   },
   "firestore": {
@@ -103,6 +137,14 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "User and Admin notifications"
+    },
+    "/mail/{mailId}": {
+      "schema": "Mail",
+      "description": "Outbox mail queue processed by Cloud Functions and Firebase Trigger Email"
+    },
+    "/email_logs/{logId}": {
+      "schema": "EmailLog",
+      "description": "Delivery logs for contract email notifications"
     }
   }
 }

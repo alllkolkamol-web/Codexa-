@@ -42,6 +42,7 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
   const [contractDate, setContractDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState('');
   const [duration, setDuration] = useState('60 يوماً عمل');
+  const [accessPassword, setAccessPassword] = useState('');
   const [status, setStatus] = useState<ContractStatus>('waiting_client');
 
   const [loading, setLoading] = useState(false);
@@ -84,8 +85,8 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
     e.preventDefault();
     setError(null);
 
-    if (!clientName.trim() || !clientEmail.trim() || !projectName.trim() || !amount || !contractCode) {
-      setError('يرجى ملء جميع الحقول الإلزامية الأساسية (اسم العميل، البريد الإلكتروني، اسم المشروع، كود العقد والمبلغ).');
+    if (!clientName.trim() || !projectName.trim() || !amount || !contractCode) {
+      setError('يرجى ملء جميع الحقول الإلزامية الأساسية (اسم العميل، اسم المشروع، كود العقد والمبلغ).');
       return;
     }
 
@@ -93,11 +94,13 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
     try {
       // Lookup registered client UID if exists
       let assignedClientId = `client_${Date.now()}`;
-      try {
-        const existingUid = await findUserIdByEmail(clientEmail.trim());
-        if (existingUid) assignedClientId = existingUid;
-      } catch (e) {
-        console.warn("Email lookup fallback:", e);
+      if (clientEmail.trim()) {
+        try {
+          const existingUid = await findUserIdByEmail(clientEmail.trim());
+          if (existingUid) assignedClientId = existingUid;
+        } catch (e) {
+          console.warn("Email lookup fallback:", e);
+        }
       }
 
       const numAmount = Number(amount) || 0;
@@ -106,7 +109,7 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
         contractCode,
         clientId: assignedClientId,
         clientName: clientName.trim(),
-        clientEmail: clientEmail.trim().toLowerCase(),
+        clientEmail: clientEmail.trim() ? clientEmail.trim().toLowerCase() : undefined,
         clientPhone: clientPhone.trim(),
         projectName: projectName.trim(),
         contractType: contractType.trim(),
@@ -119,6 +122,7 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
         contractDate,
         endDate: endDate || 'وفقاً لمراحل التسليم',
         duration,
+        accessPassword: accessPassword.trim() || undefined,
         status,
         verificationStatus: 'unverified',
       });
@@ -189,23 +193,34 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
         <form onSubmit={handleSubmit} className="space-y-6">
           
           {/* Section: Contract Code & Status */}
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 items-center justify-between gap-4">
             <div>
               <label className="text-[11px] font-semibold text-slate-400 block mb-1">
-                كود العقد الرسمي المولد تلقائياً (CDX-YYYY-XXXXXX):
+                كود العقد الرسمي (CDX-YYYY-XXXXXX):
               </label>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-base font-bold text-blue-400 bg-blue-950/60 px-3 py-1 rounded-lg border border-blue-800/60">
-                  {generatingCode ? 'جاري التوليد...' : contractCode}
+                  {generatingCode ? 'جاري...' : contractCode}
                 </span>
                 <button
                   type="button"
                   onClick={initCode}
-                  className="text-xs text-slate-400 hover:text-white underline"
+                  className="text-[10px] text-slate-500 hover:text-white underline"
                 >
-                  توليد كود آخر
+                  تغيير الكود
                 </button>
               </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-400 block mb-1">كلمة مرور العقد (اختياري):</label>
+              <input
+                type="text"
+                value={accessPassword}
+                onChange={(e) => setAccessPassword(e.target.value)}
+                placeholder="مثلاً: 123456"
+                className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-blue-500"
+              />
             </div>
 
             <div>
@@ -213,11 +228,11 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as ContractStatus)}
-                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none"
+                className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none"
               >
-                <option value="waiting_client">بانتظار العميل (waiting_client)</option>
-                <option value="draft">مسودة (draft)</option>
-                <option value="pending_review">قيد المراجعة (pending_review)</option>
+                <option value="waiting_client">بانتظار العميل</option>
+                <option value="draft">مسودة</option>
+                <option value="pending_review">قيد المراجعة</option>
               </select>
             </div>
           </div>
@@ -244,11 +259,10 @@ export const CreateContract: React.FC<CreateContractProps> = ({ onBack, onCreate
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  البريد الإلكتروني للعميل <span className="text-red-400">*</span>
+                  البريد الإلكتروني للعميل (اختياري)
                 </label>
                 <input
                   type="email"
-                  required
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
                   onBlur={handleEmailBlur}
