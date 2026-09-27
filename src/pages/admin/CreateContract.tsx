@@ -9,14 +9,7 @@ import {
   FilePlus, 
   ArrowRight, 
   Check, 
-  AlertCircle, 
-  Sparkles, 
-  Calendar, 
-  Coins, 
-  Building2, 
-  User, 
-  Mail, 
-  Phone 
+  AlertCircle 
 } from 'lucide-react';
 
 interface CreateContractProps {

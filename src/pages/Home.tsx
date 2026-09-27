@@ -4,7 +4,6 @@ import { OFFICIAL_PHONE } from '../types';
 import heroBannerImg from '../assets/images/codexa_hero_banner_1790428893490.jpg';
 import { searchContractByCode } from '../services/contractService';
 import { 
-  FileCheck2, 
   Layers, 
   Smartphone, 
   Globe, 

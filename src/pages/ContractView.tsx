@@ -24,7 +24,6 @@ import {
   Volume2,
   CheckSquare,
   Clock,
-  Sparkles,
   Eye,
   Lock
 } from 'lucide-react';

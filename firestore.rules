@@ -2,6 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // Helper functions
     function isAuthenticated() {
       return request.auth != null;
@@ -9,8 +14,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
-        request.auth.uid in ['IymbRSEyNVfr1Xb7MfKIhJ483VO2'] ||
-        request.auth.token.email in ['codexacode@gmail.com'] ||
+        request.auth.uid == 'IymbRSEyNVfr1Xb7MfKIhJ483VO2' ||
+        (request.auth.token.email == 'codexacode@gmail.com' && request.auth.token.email_verified == true) ||
         (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'admin')
       );
     }
@@ -19,52 +24,113 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isContractOwner(contractData) {
+      return isAuthenticated() && (
+        contractData.clientId == request.auth.uid ||
+        (request.auth.token.email != null && contractData.clientEmail != null && contractData.clientEmail.lower() == request.auth.token.email.lower()) ||
+        contractData.clientId == null ||
+        contractData.clientId == "" ||
+        contractData.clientId.matches('^client_.*')
+      );
+    }
+
     // ==========================================
     // Contracts Collection
     // ==========================================
     match /contracts/{contractId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true;
-      allow delete: if true;
-    }
+      // Read: Admin OR Contract Owner
+      allow read: if isAdmin() || isContractOwner(resource.data);
 
-    // ==========================================
-    // Notifications Collection
-    // ==========================================
-    match /notifications/{notificationId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true;
-      allow delete: if true;
-    }
+      // Create: ONLY Admin
+      allow create: if isAdmin();
 
-    // ==========================================
-    // Mail Queue Collection
-    // ==========================================
-    match /mail/{mailId} {
-      allow read, create, update, delete: if true;
-    }
+      // Update: Admin OR Contract Owner updating permitted fields
+      allow update: if isAdmin() || (
+        isContractOwner(resource.data) &&
+        request.resource.data.contractCode == resource.data.contractCode &&
+        request.resource.data.projectName == resource.data.projectName &&
+        request.resource.data.projectPrice == resource.data.projectPrice
+      );
 
-    // ==========================================
-    // Email Logs Collection
-    // ==========================================
-    match /email_logs/{logId} {
-      allow read, create, update, delete: if true;
+      // Delete: ONLY Admin
+      allow delete: if isAdmin();
     }
 
     // ==========================================
     // Users Profile Collection
     // ==========================================
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if true;
+      // Read: Admin OR Profile Owner OR User with matching email
+      allow read: if isAdmin() || isOwner(userId) || (
+        isAuthenticated() && resource.data.email != null && request.auth.token.email != null && resource.data.email.lower() == request.auth.token.email.lower()
+      );
+
+      // Create: Admin OR User creating own profile without admin role
+      allow create: if isAdmin() || (
+        isOwner(userId) &&
+        (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role != 'admin')
+      );
+
+      // Update: Admin OR User updating own profile without self-elevating to admin
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == resource.data.role || request.resource.data.role != 'admin')
+      );
+
+      // Delete: ONLY Admin
+      allow delete: if isAdmin();
     }
 
-    // Default fallback rule
-    match /{document=**} {
-      allow read, write: if true;
+    // ==========================================
+    // Notifications Collection
+    // ==========================================
+    match /notifications/{notificationId} {
+      // Read: Admin OR Notification Recipient
+      allow read: if isAdmin() || (
+        isAuthenticated() && (
+          resource.data.recipientId == request.auth.uid ||
+          resource.data.recipientId == 'all' ||
+          (resource.data.recipientEmail != null && request.auth.token.email != null && resource.data.recipientEmail.lower() == request.auth.token.email.lower())
+        )
+      );
+
+      // Create: Authenticated users (Admin or system event triggers)
+      allow create: if isAuthenticated();
+
+      // Update: Admin OR Notification Recipient (e.g. marking as read)
+      allow update: if isAdmin() || (
+        isAuthenticated() && (
+          resource.data.recipientId == request.auth.uid ||
+          resource.data.recipientId == 'all'
+        )
+      );
+
+      // Delete: ONLY Admin
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // Mail Queue Collection
+    // ==========================================
+    match /mail/{mailId} {
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // Email Logs Collection
+    // ==========================================
+    match /email_logs/{logId} {
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // System Health / Connection Check
+    // ==========================================
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

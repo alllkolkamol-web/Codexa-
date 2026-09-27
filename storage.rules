@@ -1,8 +1,58 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.uid == 'IymbRSEyNVfr1Xb7MfKIhJ483VO2' ||
+        (request.auth.token.email == 'codexacode@gmail.com' && request.auth.token.email_verified == true) ||
+        (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'admin')
+      );
+    }
+
+    function isContractOwner(contractId) {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (
+          firestore.exists(/databases/(default)/documents/contracts/$(contractId)) && (
+            firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientId == request.auth.uid ||
+            (request.auth.token.email != null && firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientEmail != null && firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientEmail.lower() == request.auth.token.email.lower()) ||
+            firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientId == null ||
+            firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientId == "" ||
+            firestore.get(/databases/(default)/documents/contracts/$(contractId)).data.clientId.matches('^client_.*')
+          )
+        )
+      );
+    }
+
+    // Voice Recordings
+    match /recordings/{contractId}/{fileName} {
+      allow read: if isAdmin() || isContractOwner(contractId);
+      allow create, update: if isAdmin() || isContractOwner(contractId);
+      allow delete: if isAdmin();
+    }
+
+    // Official Contract PDFs
+    match /contracts/{contractId}/{fileName} {
+      allow read: if isAdmin() || isContractOwner(contractId);
+      allow create, update: if isAdmin() || isContractOwner(contractId);
+      allow delete: if isAdmin();
+    }
+
+    // Notifications Assets
+    match /notifications/{notifId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Fallback: Default deny all
     match /{allPaths=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

@@ -20,9 +20,7 @@ import {
   Download, 
   AlertCircle,
   Save,
-  Clock,
   Trash2,
-  LogOut,
   Eye
 } from 'lucide-react';
 
