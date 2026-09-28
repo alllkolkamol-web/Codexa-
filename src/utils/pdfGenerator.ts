@@ -141,7 +141,6 @@ ${contract.terms || 'الشروط والضمانات الفنية وحقوق ا�
         </div>
         <div style="font-size: 10.5px; color: #334155; line-height: 1.6;">
           <p style="margin: 2px 0;">• <strong>حالة الإقرار الصوتي:</strong> تم تسجيل الإقرار الصوتي للعميل بنجاح وحفظه في سحابة Codexa المشفرة.</p>
-          <p style="margin: 2px 0;">• <strong>معرّف العميل (UID):</strong> <span dir="ltr">${contract.clientId}</span></p>
           <p style="margin: 2px 0;">• <strong>تاريخ الاعتماد والموافقة:</strong> ${formatDate(contract.approvedAt || new Date().toISOString())}</p>
           <p style="margin: 2px 0;">• <strong>التوقيع الرقمي:</strong> إقرار إلكتروني ملزم قانونياً وقائم على توثيق الصوت وقراءة بنود العقد كاملة.</p>
         </div>

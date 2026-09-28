@@ -267,7 +267,6 @@ export const OfficialContractModal: React.FC<OfficialContractModalProps> = ({
                 </div>
                 <div className="text-[11px] text-slate-700 space-y-1">
                   <p>• <strong>حالة الإقرار الصوتي:</strong> تم تسجيل الإقرار الصوتي للعميل وحفظه بنجاح في المنظومة السحابية.</p>
-                  <p>• <strong>معرّف العميل (UID):</strong> <span dir="ltr" className="font-mono text-slate-900">{contract.clientId}</span></p>
                   <p>• <strong>تاريخ الاعتماد:</strong> {contract.approvedAt ? new Date(contract.approvedAt).toLocaleString('ar-EG') : new Date().toLocaleDateString('ar-EG')}</p>
                   <p>• <strong>التوقيع الرقمي:</strong> إقرار إلكتروني ملزم قانونياً وقائم على توثيق الصوت وقراءة بنود العقد.</p>
                 </div>
