@@ -236,7 +236,15 @@ export async function searchContractByCode(
         collection(db, 'contracts'), 
         where('contractCode', '==', cleanCode)
       );
-      const snap = await getDocs(q);
+      let snap = await getDocs(q);
+
+      if (snap.empty && cleanCode !== contractCode.trim()) {
+        const qRaw = query(
+          collection(db, 'contracts'),
+          where('contractCode', '==', contractCode.trim())
+        );
+        snap = await getDocs(qRaw);
+      }
 
       if (!snap.empty) {
         const contractDoc = snap.docs[0];
