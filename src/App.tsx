@@ -10,7 +10,6 @@ import { ContractView } from './pages/ContractView';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { CreateContract } from './pages/admin/CreateContract';
 import { AdminContractDetails } from './pages/admin/AdminContractDetails';
-import { ShieldAlert } from 'lucide-react';
 import { SystemLoader } from './components/SystemLoader';
 
 function AppContent() {
@@ -54,15 +53,17 @@ function AppContent() {
       if (currentUser) {
         if (currentPath === '/login' || currentPath === '/register') {
           navigate(isAdmin ? '/admin' : '/account');
+        } else if (currentPath.startsWith('/admin') && !isAdmin) {
+          navigate('/account');
         }
       } else {
-        // If logged out and on protected routes, redirect to login
-        if (currentPath.startsWith('/account') || currentPath.startsWith('/admin') || currentPath.startsWith('/contract')) {
+        // If logged out and on protected routes, redirect to login or home
+        if (currentPath.startsWith('/account') || currentPath.startsWith('/admin')) {
           navigate('/login');
         }
       }
     }
-  }, [currentUser, isAdmin, loading]);
+  }, [currentUser, isAdmin, loading, currentPath]);
 
   if (loading || !loaderFinished) {
     return (
@@ -150,24 +151,24 @@ function AppContent() {
 
     // ADMIN ROUTES (Strictly guarded):
     if (currentPath.startsWith('/admin')) {
-      if (!currentUser || !isAdmin) {
-        // Access Denied screen for unauthorized users trying to access /admin
+      if (!currentUser) {
         return (
-          <div className="py-20 max-w-md mx-auto px-4 text-center">
-            <div className="bg-[#0c1328] rounded-2xl border border-red-900/50 p-8 shadow-xl">
-              <ShieldAlert className="w-12 h-12 text-red-400 mx-auto mb-4" />
-              <h2 className="text-lg font-bold text-white mb-2">منطقة محظورة</h2>
-              <p className="text-xs text-red-300 mb-6">
-                لا تملك صلاحيات الوصول إلى لوحة إدارة شركة Codexa. هذه الصفحة مخصصة لمدير النظام فقط.
-              </p>
-              <button
-                onClick={() => navigate('/account')}
-                className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
-              >
-                العودة إلى حسابي
-              </button>
-            </div>
-          </div>
+          <Login 
+            setCurrentView={(view) => {
+              if (view === 'home') navigate('/');
+              else if (view === 'register') navigate('/register');
+              else navigate('/account');
+            }} 
+          />
+        );
+      }
+
+      if (!isAdmin) {
+        return (
+          <ClientPortal 
+            onOpenContract={(cId) => navigate(`/contract/${cId}`, cId)} 
+            onNavigateHome={() => navigate('/')}
+          />
         );
       }
 
